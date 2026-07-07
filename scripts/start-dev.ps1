@@ -47,11 +47,48 @@ function Wait-HttpOk([string]$Url, [int]$Seconds) {
   return $false
 }
 
+# 首次运行装依赖：优先用随包附带的离线依赖(vendor/)离线安装，没有再联网装；都装好则跳过。
 if (-not (Test-Path -LiteralPath $backendPython)) {
-  throw "Backend venv not found: $backendPython"
+  Write-Host "首次运行：创建后端虚拟环境并安装依赖..."
+  $py = (Get-Command python -ErrorAction SilentlyContinue)
+  if (-not $py) { throw "未找到 python，请先安装 Python 3.10+ 并加入 PATH" }
+  $vendorPy = Join-Path $projectRoot "vendor\pip"    # 离线 wheel 目录(随包附带)
+  Push-Location $backendDir
+  python -m venv .venv
+  if (Test-Path -LiteralPath $vendorPy) {
+    Write-Host "使用随包离线依赖安装(无需联网)..."
+    & $backendPython -m pip install --no-index --find-links $vendorPy -r requirements.txt
+  } else {
+    # 联网装：先默认官方源，失败换阿里云，再失败换清华源
+    $mirrors = @(
+      @{ name = "默认源(PyPI)"; url = "" },
+      @{ name = "阿里云";       url = "https://mirrors.aliyun.com/pypi/simple/" },
+      @{ name = "清华源";       url = "https://pypi.tuna.tsinghua.edu.cn/simple/" }
+    )
+    & $backendPython -m pip install --upgrade pip
+    $installed = $false
+    foreach ($m in $mirrors) {
+      Write-Host "尝试用 $($m.name) 安装依赖..."
+      if ($m.url) {
+        $host_ = ([Uri]$m.url).Host
+        & $backendPython -m pip install -i $m.url --trusted-host $host_ -r requirements.txt
+      } else {
+        & $backendPython -m pip install -r requirements.txt
+      }
+      if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+      Write-Host "$($m.name) 安装失败，切换下一个源..."
+    }
+    if (-not $installed) { throw "依赖安装失败：默认源/阿里云/清华源均未成功，请检查网络" }
+  }
+  Pop-Location
+  if (-not (Test-Path -LiteralPath $backendPython)) { throw "后端环境创建失败" }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $frontendDir "node_modules"))) {
-  throw "Frontend dependencies not found. Run npm install in $frontendDir first."
+  Write-Host "首次运行：安装前端依赖..."
+  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "未找到 npm，请先安装 Node.js 18+" }
+  Push-Location $frontendDir
+  npm install
+  Pop-Location
 }
 
 if (Test-PortOpen 8010) {

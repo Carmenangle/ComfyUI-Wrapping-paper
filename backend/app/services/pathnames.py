@@ -20,3 +20,17 @@ def safe_seg(s: str, fallback: str = "x", *, strip: bool = True) -> str:
     if strip:
         out = out.strip("._")
     return out or fallback
+
+
+def safe_dir(s: str, fallback: str = "x") -> str:
+    """把仓库名清成安全的文件夹名，保留中文/字母数字，只挡 Windows 非法字符。
+
+    与 safe_seg 不同：safe_seg 会把中文也换成 _（适合 id/文件名），
+    safe_dir 用于「文件夹名=仓库名」，需保留中文可读性。
+    - 挡掉 Windows 路径非法字符 \\ / : * ? " < > | 和控制字符 → _
+    - 去两端空白与点（Windows 不允许文件夹名以点/空格结尾）
+    - 结果为空回退 fallback
+    """
+    out = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", s or "")
+    out = out.strip().strip(".")
+    return out or fallback

@@ -81,8 +81,8 @@ def save_local(
             raise ComfyError("取原图失败", 502)
         fn = Path(filename).name
         ext = fn.rsplit(".", 1)[1] if "." in fn else "png"
-    base = Path(output_dir) / safe_seg(repo_id)
-    base.mkdir(parents=True, exist_ok=True)
+    from app.services import repo_meta
+    base = repo_meta.repo_folder(output_dir, repo_id)  # 文件夹名=仓库名(保中文)，并写 _repo.json
     # 统一按本仓库文件夹自己的顺序编号命名——不沿用 ComfyUI 的 uid_编号(会随重启从头计数、
     # 删图后新图撞旧编号导致覆盖)。每个仓库独立编号，跨来源都不撞名。
     dest = base / _next_seq_name(base, ext)

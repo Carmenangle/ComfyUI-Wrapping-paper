@@ -40,8 +40,8 @@ def save_remote_image(url: str, output_dir: str, repo_id: str = "home") -> str:
                 data = r.content
             tail = _safe_seg(Path(url.split("?")[0]).name)
             name = tail if "." in tail else f"{uuid4().hex}.png"
-        base = Path(output_dir) / _safe_seg(repo_id)
-        base.mkdir(parents=True, exist_ok=True)
+        from app.services import repo_meta
+        base = repo_meta.repo_folder(output_dir, repo_id)  # 文件夹名=仓库名(保中文)，并写 _repo.json
         dest = base / name
         dest.write_bytes(data)
         return f"{_LOCAL_VIEW_BASE}?path={quote(str(dest))}"

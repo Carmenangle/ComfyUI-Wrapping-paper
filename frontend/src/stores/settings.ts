@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getUserState } from "../api/userState";
+import { pushSettings } from "../lib/userStateSync";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -115,11 +117,29 @@ export function applyTheme(theme: Theme) {  const dark =
 
 export function useSettings() {
   const [settings, setSettings] = useState<Settings>(load);
+  const [hydrated, setHydrated] = useState(false); // 后端为准：回填完成前不回写后端
+
+  // 启动时拉后端存档，有则以后端为准覆盖本地（跨浏览器/换机恢复）
+  useEffect(() => {
+    let alive = true;
+    getUserState()
+      .then((s) => {
+        if (alive && s.settings) {
+          const migrated = migrate(s.settings as unknown as Record<string, unknown>);
+          setSettings(migrated);
+          localStorage.setItem(KEY, JSON.stringify(migrated));
+        }
+      })
+      .catch(() => { /* 后端离线：沿用 localStorage */ })
+      .finally(() => { if (alive) setHydrated(true); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(settings));
     applyTheme(settings.theme);
-  }, [settings]);
+    if (hydrated) pushSettings(settings); // 回填完成后，本地变更（及升级时的本地存量）镜像到后端
+  }, [settings, hydrated]);
 
   // 跟随系统时，监听系统主题变化
   useEffect(() => {

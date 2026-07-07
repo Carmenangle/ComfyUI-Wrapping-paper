@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { getUserState, renameRepoFolder } from "../api/userState";
+import { pushRepos } from "../lib/userStateSync";
 
 export interface Repo {
   id: string;
@@ -25,20 +27,62 @@ function save(repos: Repo[]) {
 
 export function useRepos() {
   const [repos, setRepos] = useState<Repo[]>(load);
+  const [hydrated, setHydrated] = useState(false); // 后端为准：拉取回填完成前，不把本地值回写后端
+
+  // 启动时拉后端存档，有数据则以后端为准覆盖本地（跨浏览器/换机恢复）
+  useEffect(() => {
+    let alive = true;
+    getUserState()
+      .then((s) => {
+        if (alive && s.repos) {
+          setRepos(s.repos);
+          save(s.repos);
+        }
+      })
+      .catch(() => { /* 后端离线：沿用 localStorage */ })
+      .finally(() => { if (alive) setHydrated(true); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     save(repos);
-  }, [repos]);
+    if (hydrated) pushRepos(repos); // 回填完成后，本地变更（及升级时的本地存量）镜像到后端
+  }, [repos, hydrated]);
 
-  const addRepo = (name: string, parentId?: string) => {
+  // 同层级重名校验（同一 parentId 下不允许同名）。返回 true=可用
+  const nameAvailable = (name: string, parentId?: string, excludeId?: string) => {
+    const n = name.trim();
+    return !repos.some(
+      (r) => r.id !== excludeId && r.parentId === parentId && r.name.trim() === n,
+    );
+  };
+
+  // 新建：重名则拒绝，返回 false
+  const addRepo = (name: string, parentId?: string): boolean => {
+    if (!nameAvailable(name, parentId)) return false;
     setRepos((prev) => [
       ...prev,
       { id: crypto.randomUUID(), name, parentId, createdAt: Date.now() },
     ]);
+    return true;
   };
 
-  const renameRepo = (id: string, name: string) => {
+  // 改名：重名则拒绝返回 false；成功则同步后端重命名文件夹+重写图片路径
+  const renameRepo = (id: string, name: string): boolean => {
+    const target = repos.find((r) => r.id === id);
+    if (!target) return false;
+    if (!nameAvailable(name, target.parentId, id)) return false;
+    const oldName = target.name;
     setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, name } : r)));
+    try {
+      const settings = JSON.parse(localStorage.getItem("laf_settings") || "{}");
+      const output_dir = settings.outputDir || "";
+      if (output_dir) {
+        renameRepoFolder({ repo_id: id, old_name: oldName, new_name: name, output_dir })
+          .catch(() => { /* 后端离线：文件夹下次落盘会用新名，旧图路径可能失效 */ });
+      }
+    } catch { /* ignore */ }
+    return true;
   };
 
   // 设置仓库封面（每次生图完成时回填为最新图），记录时间戳供父仓库取最新
