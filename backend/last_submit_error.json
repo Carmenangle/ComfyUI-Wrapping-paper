@@ -1,0 +1,661 @@
+{
+  "sent_prompt": {
+    "368": {
+      "class_type": "CR Text Replace",
+      "inputs": {
+        "text": "(",
+        "find1": "",
+        "replace1": "{",
+        "find2": "",
+        "replace2": "[",
+        "find3": ""
+      }
+    },
+    "370": {
+      "class_type": "CR Text Replace",
+      "inputs": {
+        "text": ")",
+        "find1": "",
+        "replace1": "}",
+        "find2": "",
+        "replace2": "]",
+        "find3": ""
+      }
+    },
+    "369": {
+      "class_type": "PreviewAny",
+      "inputs": {
+        "source": [
+          "370",
+          0
+        ]
+      }
+    },
+    "464": {
+      "class_type": "CR Text Concatenate",
+      "inputs": {
+        "text1": "",
+        "text2": [
+          "65",
+          0
+        ]
+      }
+    },
+    "120": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": "  Analyze this image. Important: Ensure all characters mentioned in the following tags are included in the output: "
+      }
+    },
+    "453": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "19",
+          0
+        ],
+        "vae": [
+          "15",
+          0
+        ]
+      }
+    },
+    "116": {
+      "class_type": "easy cleanGpuUsed",
+      "inputs": {
+        "anything": [
+          "8",
+          0
+        ]
+      }
+    },
+    "546": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_01": [
+          "8",
+          0
+        ]
+      }
+    },
+    "366": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": " [artist:ZED],[artist:wlop],[artist:AGM],[artist:onineko], "
+      }
+    },
+    "557": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "568": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": "]"
+      }
+    },
+    "567": {
+      "class_type": "CR Text Concatenate",
+      "inputs": {
+        "text1": "",
+        "text2": [
+          "568",
+          0
+        ]
+      }
+    },
+    "575": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "576": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "142": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "569": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "108": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": "[Artist Tags:"
+      }
+    },
+    "578": {
+      "class_type": "CR Text Concatenate",
+      "inputs": {
+        "text1": "",
+        "text2": [
+          "579",
+          0
+        ]
+      }
+    },
+    "189": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_01": [
+          "464",
+          0
+        ]
+      }
+    },
+    "193": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_01": [
+          "51",
+          0
+        ]
+      }
+    },
+    "185": {
+      "class_type": "Image Comparer (rgthree)",
+      "inputs": {
+        "image_a": [
+          "184",
+          0
+        ],
+        "image_b": [
+          "8",
+          0
+        ]
+      }
+    },
+    "207": {
+      "class_type": "easy float",
+      "inputs": {
+        "value": 0.55
+      }
+    },
+    "574": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "45": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_3_06b_base.safetensors",
+        "type": "qwen_image",
+        "device": "default"
+      }
+    },
+    "585": {
+      "class_type": "CR Text",
+      "inputs": {
+        "text": "# Role\nYou are a Master-level Vision Prompt Engineering Expert. Your task is to analyze the <|image|> and generate a response with a strictly ordered Tag List and a Stylized Spatial Caption.\n\n# Section 1: Strict Tagging Sequence (1-10)\nYou must output the tags in this EXACT order:\n1. **Quality**: masterpiece, best quality\n2. **Aesthetic**: score_9, score_8\n3. **Period**: year 2025, newest\n4. **Meta**: highres, official art\n5. **Safety**: {safe, sensitive, nsfw, explicit} (Must be accurate)\n6. **Subject Count**: e.g., 1girl, 2girls\n7. **Character Names**: (Full name)\n8. **Series Names**: (Full series title)\n9. **Artist Tags**: ALWAYS prefix with @ (e.g., @artist_name)\n10. **General Tags**: (Visual details: hair, eyes, clothing, pose, background)\n\n# Section 2: Stylized Spatial Caption (The \"Composition\" Rule)\nWrite a concise paragraph (max 60 words) that MUST integrate:\n- **Perspective & Interaction**: Camera angle (e.g., side view, low angle) and how the character's body contacts the environment (e.g., \"hips resting on a ledge\", \"leaning back against a wall\").\n\n# Constraints\n- **Order is Law**: Character/Series/Artist MUST come before General Tags.\n- **Safety Honesty**: If the image is suggestive (e.g., focusing on ass/cleavage), use \"sensitive\" or \"nsfw\".\n- **No Headers**: Do not output \"Section 1\" or \"Part 2\". Just the tags and the caption.\n\n# Mandatory Output Format (Strictly Follow)\n[Tag 1], [Tag 2], [Tag 3], [Tag 4], [Tag 5], [Tag 6], [Tag 7], [Tag 8], [Tag 9], [Tag 10]\n\n[Your Section 2 Caption Paragraph Here]\n\n# Example\nmasterpiece, score_9, year 2025, highres, safe, 4girls, gotoh hitori, ijichi nijika, kita ikuyo, yamada ryo, bocchi the rock!, kessoku band, @tansuan_(ensj3875), @abpart, @magurotatakighn, @konya_karasue, @yunsang, @omone_hokoma_agm, @aoi_sakura_(seak5545), @gainoob, blonde hair, blue eyes, blue hair, blush, braid, closed eyes, closed mouth, color coordination, column lineup, crossed bangs, expressionless, floating hair, green eyes, grid lineup, long hair, looking at viewer, mole, mole under eye, multiple girls, one eye closed, open mouth, parted bangs, pink hair, red hair, short hair, side ponytail, side ponytail with braided base, smile, v, yellow eyes, absurdres, commentary request,\n\nFour Kessoku Band members are depicted in a dynamic, close-up composition, lying on their backs on water with expressive, varied facial expressions under bright, sparkling lighting."
+      }
+    },
+    "291": {
+      "class_type": "RepeatLatentBatch",
+      "inputs": {
+        "samples": [
+          "198",
+          0
+        ],
+        "amount": 1
+      }
+    },
+    "66": {
+      "class_type": "PathchSageAttentionKJ",
+      "inputs": {
+        "model": [
+          "44",
+          0
+        ],
+        "sage_attention": "auto",
+        "allow_compile": true
+      }
+    },
+    "608": {
+      "class_type": "PrimitiveInt",
+      "inputs": {
+        "value": 36
+      }
+    },
+    "204": {
+      "class_type": "PrimitiveBoolean",
+      "inputs": {
+        "value": false
+      }
+    },
+    "182": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "184",
+          0
+        ],
+        "vae": [
+          "15",
+          0
+        ]
+      }
+    },
+    "612": {
+      "class_type": "Float",
+      "inputs": {
+        "Number": "4.0"
+      }
+    },
+    "449": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_02": [
+          "585",
+          0
+        ]
+      }
+    },
+    "198": {
+      "class_type": "ImpactConditionalBranch",
+      "inputs": {
+        "tt_value": [
+          "28",
+          0
+        ],
+        "ff_value": [
+          "182",
+          0
+        ],
+        "cond": false
+      }
+    },
+    "201": {
+      "class_type": "ImpactConditionalBranch",
+      "inputs": {
+        "tt_value": [
+          "208",
+          0
+        ],
+        "ff_value": [
+          "207",
+          0
+        ],
+        "cond": false
+      }
+    },
+    "606": {
+      "class_type": "ImpactConditionalBranch",
+      "inputs": {
+        "tt_value": [
+          "604",
+          0
+        ],
+        "ff_value": [
+          "608",
+          0
+        ],
+        "cond": false
+      }
+    },
+    "611": {
+      "class_type": "ImpactConditionalBranch",
+      "inputs": {
+        "tt_value": [
+          "610",
+          0
+        ],
+        "ff_value": [
+          "612",
+          0
+        ],
+        "cond": false
+      }
+    },
+    "208": {
+      "class_type": "easy float",
+      "inputs": {
+        "value": 2
+      }
+    },
+    "604": {
+      "class_type": "PrimitiveInt",
+      "inputs": {
+        "value": 12
+      }
+    },
+    "91": {
+      "class_type": "Seed (rgthree)",
+      "inputs": {
+        "seed": -1
+      }
+    },
+    "12": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "45",
+          0
+        ],
+        "text": "worst quality, low quality, score_1, score_2, score_3, artist name,lowres,jpeg, cropped, bad composition, artifacts bad proportions, error, inaccurate limb, bad anatomy, bad, ugly, terrible, extra fingers, fewer fingers, missing fingers, extra arms, extra legs, inaccurate eyes,extra digit, fewer digits, trademark, username, watermarksignature, watermark,text,words,"
+      }
+    },
+    "371": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": "\n[Artist Tags: tansuan_(ensj3875), abpart, magurotatakighn, konya_karasue, yunsang, omone_hokoma_agm, aoi_sakura_(seak5545), gainoob]"
+      }
+    },
+    "616": {
+      "class_type": "Seed (rgthree)",
+      "inputs": {
+        "seed": -1
+      }
+    },
+    "570": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "583": {
+      "class_type": "llama_cpp_instruct_adv",
+      "inputs": {
+        "llama_model": [
+          "584",
+          0
+        ],
+        "images": [
+          "184",
+          0
+        ],
+        "custom_prompt": "",
+        "system_prompt": "",
+        "seed": 728302437355616,
+        "preset_prompt": "Normal - Describe",
+        "inference_mode": "one by one",
+        "max_frames": 24,
+        "max_size": 256,
+        "force_offload": "randomize",
+        "save_states": true
+      }
+    },
+    "566": {
+      "class_type": "CR Text Concatenate",
+      "inputs": {
+        "text1": "",
+        "text2": [
+          "630",
+          0
+        ]
+      }
+    },
+    "65": {
+      "class_type": "ShowText|pysssss",
+      "inputs": {
+        "text": "restra25"
+      }
+    },
+    "53": {
+      "class_type": "CR Text Concatenate",
+      "inputs": {
+        "text1": "",
+        "text2": [
+          "189",
+          0
+        ]
+      }
+    },
+    "184": {
+      "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+      "inputs": {
+        "image": [
+          "193",
+          0
+        ],
+        "scale_to_length": 1152,
+        "aspect_ratio": "original",
+        "proportional_width": 1,
+        "proportional_height": 1,
+        "fit": "letterbox",
+        "method": "lanczos",
+        "round_to_multiple": "8",
+        "scale_to_side": "longest",
+        "background_color": "#000000"
+      }
+    },
+    "263": {
+      "class_type": "PrimitiveInt",
+      "inputs": {
+        "value": 1536
+      }
+    },
+    "28": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 896,
+        "height": 1152,
+        "batch_size": 1
+      }
+    },
+    "610": {
+      "class_type": "Float",
+      "inputs": {
+        "Number": "2"
+      }
+    },
+    "19": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "603",
+          0
+        ],
+        "positive": [
+          "11",
+          0
+        ],
+        "negative": [
+          "12",
+          0
+        ],
+        "latent_image": [
+          "291",
+          0
+        ],
+        "seed": 338144620226380,
+        "steps": "fixed",
+        "cfg": 36,
+        "denoise": "simple",
+        "sampler_name": 4,
+        "scheduler": "euler"
+      }
+    },
+    "563": {
+      "class_type": "PreviewAny",
+      "inputs": {
+        "source": [
+          "558",
+          1
+        ]
+      }
+    },
+    "629": {
+      "class_type": "1hew_TextListToString",
+      "inputs": {
+        "text_list": [
+          "563",
+          0
+        ],
+        "prefix": "",
+        "suffix": "",
+        "separator": ","
+      }
+    },
+    "630": {
+      "class_type": "PreviewAny",
+      "inputs": {
+        "source": [
+          "629",
+          0
+        ]
+      }
+    },
+    "613": {
+      "class_type": "PrimitiveBoolean",
+      "inputs": {
+        "value": false
+      }
+    },
+    "372": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "577": {
+      "class_type": "MarkdownNote",
+      "inputs": {}
+    },
+    "44": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "anima_baseV10.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "601": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "66",
+          0
+        ],
+        "lora_name": "anima-turbo-lora-v0.1.safetensors",
+        "strength_model": 0.4
+      }
+    },
+    "15": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "qwen_image_vae.safetensors"
+      }
+    },
+    "619": {
+      "class_type": "PromptStashPassthrough",
+      "inputs": {
+        "text": "masterpiece, score_9, year 2025, highres, safe, 1girl, liduke, piromizu, restra25, @liduke, @piromizu, @restra25, blonde hair, red eyes, pink visor, pink and white swimsuit, white bikini top with bow, black and white shorts, goggles, pig-shaped pendant, pigtails, hand raised in peace sign, looking at viewer, detailed shading, clean lines, bright lighting, isolated on white background\n\nA single girl with blonde hair and red eyes stands confidently, one hand raised in a peace sign, wearing a pink visor and a detailed pink-and-white swimsuit, her body fully visible against a stark white background with no environmental interaction.",
+        "use_input_text": true,
+        "prompt_text": false
+      }
+    },
+    "626": {
+      "class_type": "TTResolutionSelector",
+      "inputs": {
+        "custom_width": 1024,
+        "custom_height": 1024,
+        "use_custom_resolution": true,
+        "resolution": "1024x1536 (2:3) (竖屏)"
+      }
+    },
+    "11": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "45",
+          0
+        ],
+        "text": ""
+      }
+    },
+    "292": {
+      "class_type": "easy showAnything",
+      "inputs": {
+        "anything": [
+          "619",
+          0
+        ]
+      }
+    },
+    "121": {
+      "class_type": "ShowText|pysssss",
+      "inputs": {
+        "text": "[Artist Tags:liduke,piromizu,]  Analyze this image. Important: Ensure all characters mentioned in the following tags are included in the output: restra25"
+      }
+    },
+    "471": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_01": [
+          "292",
+          0
+        ],
+        "any_02": [
+          "449",
+          0
+        ]
+      }
+    },
+    "579": {
+      "class_type": "CR Prompt Text",
+      "inputs": {
+        "prompt": "liduke,piromizu,"
+      }
+    },
+    "573": {
+      "class_type": "GroupIgnoreManager",
+      "inputs": {}
+    },
+    "88": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "8",
+          0
+        ],
+        "filename_prefix": "anima1"
+      }
+    },
+    "584": {
+      "class_type": "llama_cpp_model_loader",
+      "inputs": {
+        "model": "Qwen3VL-8B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf",
+        "mmproj": "Qwen3VL-8B-Uncensored-HauhauCS-Aggressive-mmproj-f16.gguf",
+        "chat_handler": "Qwen3.5",
+        "n_ctx": 8192,
+        "vram_limit": -1,
+        "image_min_tokens": 0,
+        "image_max_tokens": 0
+      }
+    },
+    "365": {
+      "class_type": "PrimitiveBoolean",
+      "inputs": {
+        "value": false
+      }
+    },
+    "51": {
+      "class_type": "DanbooruGalleryNode",
+      "inputs": {
+        "bypass_prompts": "{\"selections\":[{\"post_id\":\"11675754\",\"prompt\":\"zenless zone zero, velina airgid, 1girl, ankle, blush, breasts, eyes visible through hair, foot out of frame, hair over one eye, heart, large breasts, leg up, long hair, long sleeves, looking at viewer, mole, mole under mouth, panties, parted lips, pointy ears, purple eyes, sideboob, simple background, smile, solo, teeth, thighhighs, thighs, underwear, white background, white panties, white thighhighs, absurdres, commentary, highres, untranslatable commentary\",\"image_url\":\"https://cdn.donmai.us/original/23/9b/239b8baffcd40081305a71d81a2cd699.jpg\"}]}"
+      }
+    },
+    "558": {
+      "class_type": "DanbooruGalleryNode",
+      "inputs": {
+        "bypass_prompts": "{\"prompt\":\"puuzaki puuna\",\"image_url\":\"https://cdn.donmai.us/original/0b/05/0b05edcdfcd69b323a193a8f2ced79a5.jpg\"}"
+      }
+    },
+    "603": {
+      "class_type": "ImpactConditionalBranch",
+      "inputs": {
+        "tt_value": [
+          "601",
+          0
+        ],
+        "ff_value": [
+          "66",
+          0
+        ],
+        "cond": false
+      }
+    }
+  },
+  "comfyui_error": "{\"error\": {\"type\": \"missing_node_type\", \"message\": \"Node 'MarkdownNote' not found. The custom node may not be installed.\", \"details\": \"Node ID '#453'\", \"extra_info\": {\"node_id\": \"453\", \"class_type\": \"MarkdownNote\", \"node_title\": \"MarkdownNote\"}}, \"node_errors\": {}}"
+}

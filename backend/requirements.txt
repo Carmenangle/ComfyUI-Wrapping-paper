@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+langchain
+langchain-openai
+rank_bm25  # 节点检索的稀疏(BM25 关键词)召回，与向量检索做 Hybrid（治专有名词点名却漏）
+requests
+websocket-client
+pillow
+pytest  # 仅测试用；跑 python -m pytest

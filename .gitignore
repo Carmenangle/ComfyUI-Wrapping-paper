@@ -1,0 +1,39 @@
+# ===== 依赖 / 构建产物 =====
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+*.pyc
+__pycache__/
+.env
+*.log
+
+# ===== 用户数据 / 隐私 / 大文件（整个 data 目录都不传，运行时自动生成）=====
+backend/data/
+# data 下含：对话记录(chat_snapshots)、知识库(chroma)、生成图(assets/thumbs)、
+# 数据库(app.db/checkpoints.db)、本机路径配置(comfy_config.json)、搭建会话(build_sessions)、
+# 模板/工作流(templates/workflows)、日志——全是用户私有数据或本机绝对路径，绝不上传。
+
+# ===== 设计 / 规划 / 排障文档（内部草稿，不随代码发布）=====
+docs/
+CONTEXT.md
+ARCHITECTURE.md
+FRONTEND_ADAPT_PLAN.md
+FRONTEND_REVAMP.md
+WORKFLOW_BUILDER_PLAN.md
+
+# ===== 本地杂项 / 临时脚本 =====
+.DS_Store
+Thumbs.db
+*.tmp
+_backfill.py
+_check.py
+_chk.py
+_fix*.py
+
+# 会上传：backend/app(含内置骨架 skeleton_store) · backend/requirements.txt ·
+#         frontend/src + 配置 · comfyui-ext(laf_lock 扩展) · scripts · start-dev.bat/stop-dev.bat · README.md
+
+# 编辑器/笔记软件本地配置
+.obsidian/
+.vscode/
+.idea/

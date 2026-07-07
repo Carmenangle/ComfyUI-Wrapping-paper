@@ -1,0 +1,483 @@
+import { useEffect, useRef, useState } from "react";
+import { Sparkles, RefreshCw, Save, Eraser, LayoutTemplate, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { PageShell } from "../components/layout/PageShell";
+import { ConfirmModal } from "../components/Modal";
+import { useSettings, activeChatModel } from "../stores/settings";
+import {
+  buildWorkflow, buildModule, buildDirect, buildPlan, saveWorkflow, syncNodes,
+  listSkeletons, skeletonGraph, type Skeleton,
+  listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta,
+} from "../api/ai";
+import { fullUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+
+// 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
+// pendingNeed=点同意时真正搭建用的需求(原需求+方案)；planText=纯方案文本，供「编辑」填回输入框改。
+interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; editing?: boolean; missingNodes?: string[]; }
+
+// AI 搭工作流（双栏）：左栏多轮对话与 AI 探讨，右栏完整功能 ComfyUI 画布。
+// AI 每轮读回右侧画布作上下文 → 输出完整 graph → 写入右侧；用户可在画布里手动接着改。
+export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => void } = {}) {
+  const { settings } = useSettings();
+  const chat = activeChatModel(settings);
+  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [note, setNote] = useState("");
+  const [incremental, setIncremental] = useState(true);  // 增量模式：冻结现有图只加模块
+  const [advisor, setAdvisor] = useState(false);  // 顾问模式：先出人话方案+确认，再执行（面向小白）
+  const [direct, setDirect] = useState(true);  // 精简直连：信任强模型一次到位，只调1次模型，最快（默认开）
+  const [skeletons, setSkeletons] = useState<Skeleton[]>([]);
+  const [loadingSkel, setLoadingSkel] = useState("");  // 正在载入的骨架 id
+  // 搭建会话（进度保存 + 多开）
+  const LAST_KEY = "laf_build_last_session";
+  const [sessionId, setSessionId] = useState<string>("");
+  const [sessionName, setSessionName] = useState<string>("未命名工作流");
+  const [sessions, setSessions] = useState<BuildSessionMeta[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const [deleteSess, setDeleteSess] = useState<BuildSessionMeta | null>(null);
+  const skeletonIdRef = useRef<string>("");   // 当前会话用的骨架 id（存进会话）
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const src = fullUrl(settings.comfyuiUrl);
+  const canSend = input.trim().length > 0 && !busy && !!chat.modelName && ready;
+
+  // 收子帧 ready（画布可用）
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      if (isLafMessage(ev.data, "ready")) setReady(true);
+    };
+    window.addEventListener("message", onMsg);
+    // 补一次 ping，防错过首帧 ready
+    const t = setTimeout(() => postToFrame(frameRef.current?.contentWindow, "ping_ready"), 1500);
+    return () => { window.removeEventListener("message", onMsg); clearTimeout(t); };
+  }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [msgs]);
+
+  // 自动保存进度：对话变化后防抖 1.5s 存一次（有内容且画布就绪才存），避免刷新/重启丢进度
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!ready || msgs.length === 0) return;
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    autoSaveRef.current = setTimeout(() => { saveProgress(true); }, 1500);
+    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
+  }, [msgs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 载入骨架候选（内置 + 工作流文件夹），供空画布时选正确底座
+  useEffect(() => {
+    listSkeletons(settings.workflowDir).then((r) => setSkeletons(r.skeletons)).catch(() => setSkeletons([]));
+  }, [settings.workflowDir]);
+
+  const push = (role: Msg["role"], text: string) =>
+    setMsgs((m) => [...m, { id: crypto.randomUUID(), role, text }]);
+
+  // 选骨架：取 graph → load 进画布。之后发消息走增量模式在此底座上改。
+  const loadSkeleton = async (s: Skeleton) => {
+    setLoadingSkel(s.id);
+    setNote("");
+    try {
+      const r = await skeletonGraph(s.id, settings.workflowDir);
+      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
+      skeletonIdRef.current = s.id;
+      push("assistant", `已载入骨架「${s.name}」(${s.node_count} 节点)作为底座。接下来告诉我要改什么，我会在它基础上增量调整，不会推倒重来。`);
+    } catch (e) {
+      setNote("载入骨架失败：" + (e as Error).message);
+    } finally {
+      setLoadingSkel("");
+    }
+  };
+
+  // —— 搭建会话：进度保存 + 多开 ——
+  const refreshSessions = () =>
+    listBuildSessions().then((r) => setSessions(r.sessions)).catch(() => {});
+
+  useEffect(() => { refreshSessions(); }, []);
+
+  // 首次画布就绪后，若本机上次留有会话 id，自动恢复该会话（对话 + 画布图）
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!ready || restoredRef.current) return;
+    restoredRef.current = true;
+    const last = localStorage.getItem(LAST_KEY);
+    if (last) restoreSession(last);
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 保存当前进度：读回画布图 + 当前对话，存进会话（新建则生成 id）
+  const saveProgress = async (silent = false) => {
+    try {
+      const graph = await readGraph();
+      const r = await saveBuildSession({
+        id: sessionId, name: sessionName, msgs, graph, skeletonId: skeletonIdRef.current,
+      });
+      if (!sessionId) { setSessionId(r.id); localStorage.setItem(LAST_KEY, r.id); }
+      refreshSessions();
+      if (!silent) setNote(`已保存进度到「${r.name}」`);
+    } catch (e) {
+      if (!silent) setNote("保存进度失败：" + (e as Error).message);
+    }
+  };
+
+  // 恢复某会话：拉完整内容 → 恢复对话 → load 画布图回右侧
+  const restoreSession = async (id: string) => {
+    try {
+      const s = await getBuildSession(id);
+      setSessionId(s.id);
+      setSessionName(s.name);
+      skeletonIdRef.current = s.skeleton_id || "";
+      setMsgs((s.msgs as Msg[]) || []);
+      localStorage.setItem(LAST_KEY, s.id);
+      if (s.graph && Object.keys(s.graph).length) {
+        postToFrame(frameRef.current?.contentWindow, "load", { workflow: s.graph });
+      }
+      setShowSessions(false);
+      setNote(`已恢复会话「${s.name}」`);
+    } catch (e) {
+      setNote("恢复会话失败：" + (e as Error).message);
+    }
+  };
+
+  // 新建会话：清空对话 + 清空画布 + 重置 id
+  const newSession = () => {
+    setSessionId("");
+    setSessionName("未命名工作流");
+    skeletonIdRef.current = "";
+    setMsgs([]);
+    localStorage.removeItem(LAST_KEY);
+    postToFrame(frameRef.current?.contentWindow, "clear_graph");
+    setShowSessions(false);
+    setNote("已新建空白会话");
+  };
+
+  const doDeleteSession = async () => {
+    if (!deleteSess) return;
+    const id = deleteSess.id;
+    setDeleteSess(null);
+    try {
+      await deleteBuildSession(id);
+      if (id === sessionId) newSession();
+      refreshSessions();
+    } catch (e) {
+      setNote("删除失败：" + (e as Error).message);
+    }
+  };
+
+  // 向右侧画布发消息并等指定类型回复
+  const ask = <T,>(type: string, expect: string, ms = 6000) =>
+    new Promise<T | null>((resolve) => {
+      const win = frameRef.current?.contentWindow;
+      if (!win) return resolve(null);
+      let done = false;
+      const onMsg = (ev: MessageEvent) => {
+        if (!isLafMessage(ev.data, expect)) return;
+        if (ev.source !== win) return;
+        done = true;
+        window.removeEventListener("message", onMsg);
+        resolve(ev.data.payload as T);
+      };
+      window.addEventListener("message", onMsg);
+      postToFrame(win, type);
+      setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve(null); } }, ms);
+    });
+
+  // 读回右侧画布当前 API 格式（作 AI 上下文；空画布返回 {}）
+  const readGraph = async (): Promise<Record<string, unknown>> => {
+    const r = await ask<{ output?: Record<string, unknown>; ok?: boolean }>(
+      "request_api_prompt", "api_prompt", 8000,
+    );
+    return r?.output || {};
+  };
+
+  const doSend = async () => {
+    const need = input.trim();
+    setInput("");
+    push("user", need);
+    setBusy(true);
+    setNote("");
+    try {
+      if (advisor) {
+        // 顾问模式：先出人话方案，不改画布；「同意执行」时让搭建**照这段方案**来（原需求+方案一起）
+        const current = await readGraph();
+        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current });
+        const planNeed = `${need}\n\n【已和用户确认的搭建方案，请严格照此搭建】\n${r.plan}`;
+        setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: r.plan, pendingNeed: planNeed, planText: r.plan }]);
+      } else {
+        await doExecute(need);
+      }
+    } catch (e) {
+      push("assistant", "请求失败：" + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 真正生成并写入画布（直接模式直接调；顾问模式由「同意执行」按钮调）
+  const doExecute = async (need: string) => {
+    const current = await readGraph();               // 带上当前画布作上下文
+    const hasNodes = Object.keys(current).length > 0;
+    // 精简直连(默认)：只调1次模型，信任Opus一次到位，最快不超时——优先走它。
+    // 否则按增量/整图老路（多层校验自修，慢但对弱模型稳）。
+    // 不传 proxy 给对话模型：与仓库对话同路径（默认 httpx 读系统环境），强行代理反而切断中转连接
+    const r = direct
+      ? await buildDirect({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: hasNodes ? current : undefined })
+      : incremental && hasNodes
+      ? await buildModule({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current })
+      : await buildWorkflow({
+          need, chat, embed: settings.embedModel,
+          comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir,
+          currentGraph: current, save: false,  // 迭代中途不落盘，只回图写画布
+        });
+    const miss = r.missing_nodes && r.missing_nodes.length ? r.missing_nodes : undefined;
+    if (r.ok && r.graph && Object.keys(r.graph).length) {
+      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
+      const warn = r.warnings && r.warnings.length
+        ? "\n提示（不影响写入，可继续调整）：\n" + r.warnings.join("\n")
+        : "";
+      setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant",
+        text: "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。" + warn, missingNodes: miss }]);
+    } else {
+      const warn = r.warnings && r.warnings.length ? "\n" + r.warnings.join("\n") : "";
+      setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant",
+        text: "没能生成合法工作流：\n" + (r.errors.join("\n") || "未知错误") + warn, missingNodes: miss }]);
+    }
+  };
+
+  // 顾问模式「同意执行」：用方案对应的 need 真正生成
+  const approvePlan = async (msgId: string, need: string) => {
+    setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, pendingNeed: undefined } : x)));  // 收起按钮
+    setBusy(true);
+    setNote("");
+    try {
+      await doExecute(need);
+    } catch (e) {
+      push("assistant", "请求失败：" + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doSync = async () => {
+    setNote("同步节点库中…");
+    try {
+      const r = await syncNodes(settings.embedModel, settings.comfyuiUrl);
+      setNote(`已开始同步 ${r.total_packs} 个节点包，进度见「节点知识库」页`);
+    } catch (e) {
+      setNote("同步失败：" + (e as Error).message);
+    }
+  };
+
+  const doClear = () => {
+    postToFrame(frameRef.current?.contentWindow, "clear_graph");
+    setNote("已清空画布");
+  };
+
+  const doSave = async () => {
+    setNote("读取画布并保存…");
+    try {
+      const graph = await readGraph();
+      if (!Object.keys(graph).length) { setNote("画布为空，无可保存内容"); return; }
+      const r = await saveWorkflow({ graph, embed: settings.embedModel, workflowDir: settings.workflowDir });
+      setNote("已保存到：" + r.path);
+    } catch (e) {
+      setNote("保存失败：" + (e as Error).message);
+    }
+  };
+
+  return (
+    <PageShell
+      title="AI 搭工作流"
+      actions={
+        <>
+          <button className="btn" onClick={newSession} title="新建一个空白搭建会话">
+            <Plus size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />新建
+          </button>
+          <button className="btn" onClick={() => saveProgress(false)} disabled={!ready} title="保存当前对话+画布进度，重启/刷新后可恢复">
+            <Save size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />保存进度
+          </button>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <button className="btn" onClick={() => { refreshSessions(); setShowSessions((v) => !v); }} title="打开/切换已保存的会话">
+              <FolderOpen size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />会话（{sessions.length}）
+            </button>
+            {showSessions && (
+              <div className="sess-dropdown">
+                {sessions.length === 0 && <div className="sess-empty">还没有保存的会话</div>}
+                {sessions.map((s) => (
+                  <div key={s.id} className={`sess-item${s.id === sessionId ? " active" : ""}`}>
+                    <button className="sess-open" onClick={() => restoreSession(s.id)} title="恢复此会话">
+                      <span className="sess-name">{s.name}</span>
+                      <span className="sess-meta">{s.node_count} 节点 · {s.msg_count} 条对话</span>
+                    </button>
+                    <button className="icon-btn" title="删除会话" onClick={() => setDeleteSess(s)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="btn" onClick={doSync}>
+            <RefreshCw size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />同步节点库
+          </button>
+          <button className="btn" onClick={doClear} disabled={!ready} title="清空右侧画布，从空白重新搭建">
+            <Eraser size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />清空画布
+          </button>
+          <button className="btn" onClick={doSave} disabled={!ready}>
+            <Save size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />保存到工作流目录
+          </button>
+        </>
+      }
+    >
+      {note && <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "0 0 8px" }}>{note}</p>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 8px" }}>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>当前会话：</span>
+        <input value={sessionName} onChange={(e) => setSessionName(e.target.value)}
+          onBlur={() => { if (sessionId) saveProgress(true); }}
+          placeholder="给这个工作流起个名字" style={{ fontSize: 13, maxWidth: 260, padding: "3px 8px" }} />
+      </div>
+      <div className="ai-build-split">
+        <div className="ai-build-chat">
+          <div className="ai-build-msgs" ref={scrollRef}>
+            {msgs.length === 0 && (
+              <div className="ai-build-empty">
+                <div className="ico"><Sparkles size={22} /></div>
+                先选一个<b>骨架底座</b>再让我改，比从零硬搭更稳（底座已验证正确，我只做增量调整）。<br />
+                也可直接描述需求让我从零搭，但复杂流更推荐先挑底座。<br />
+                <span style={{ opacity: 0.8 }}>首次使用请先点右上「同步节点库」。</span>
+                {skeletons.length > 0 && (
+                  <div className="skel-picker">
+                    <div className="skel-picker-title"><LayoutTemplate size={14} /> 选一个骨架底座</div>
+                    {skeletons.map((s) => (
+                      <button key={s.id} className="skel-item" disabled={!ready || !!loadingSkel}
+                        onClick={() => loadSkeleton(s)} title={s.desc}>
+                        <span className="skel-name">{s.name}</span>
+                        <span className="skel-meta">{s.source === "builtin" ? "内置" : "文件"} · {s.node_count} 节点</span>
+                        {loadingSkel === s.id && <span className="skel-loading">载入中…</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {msgs.map((m) => (
+              <div key={m.id} className={`ai-build-msg ${m.role}`}>
+                <div className="avatar">{m.role === "user" ? "我" : <Sparkles size={14} />}</div>
+                <div className="bubble">
+                  {m.editing ? (
+                    // 编辑态：直接在方案气泡里改文本，改完「保存并执行」照改后方案搭
+                    <>
+                      <textarea
+                        className="plan-edit"
+                        value={m.planText ?? m.text}
+                        onChange={(e) => setMsgs((arr) => arr.map((x) => (x.id === m.id ? { ...x, planText: e.target.value } : x)))}
+                        rows={10}
+                      />
+                      <div className="plan-actions">
+                        <button className="btn primary" disabled={busy}
+                          onClick={() => {
+                            const plan = (m.planText ?? m.text);
+                            const need = `请严格照以下方案搭建：\n${plan}`;
+                            setMsgs((arr) => arr.map((x) => (x.id === m.id ? { ...x, editing: false, text: plan, pendingNeed: undefined } : x)));
+                            approvePlan(m.id, need);
+                          }}>
+                          <Sparkles size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />保存并执行
+                        </button>
+                        <button className="btn" disabled={busy}
+                          title="退出编辑，保留原方案和按钮"
+                          onClick={() => setMsgs((arr) => arr.map((x) => (x.id === m.id ? { ...x, editing: false } : x)))}>
+                          取消编辑
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {m.text}
+                      {m.pendingNeed && (
+                        <div className="plan-actions">
+                          <button className="btn primary" disabled={busy}
+                            onClick={() => approvePlan(m.id, m.pendingNeed!)}>
+                            <Sparkles size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />同意执行
+                          </button>
+                          <button className="btn" disabled={busy}
+                            title="直接在这段方案上修改，改完保存并执行"
+                            onClick={() => setMsgs((arr) => arr.map((x) => (x.id === m.id ? { ...x, editing: true } : x)))}>
+                            编辑
+                          </button>
+                          <button className="btn" disabled={busy}
+                            title="撤销这条方案"
+                            onClick={() => setMsgs((arr) => arr.filter((x) => x.id !== m.id))}>
+                            取消
+                          </button>
+                        </div>
+                      )}
+                      {m.missingNodes && m.missingNodes.length > 0 && (
+                        <div className="plan-actions">
+                          {m.missingNodes.map((n) => (
+                            <button key={n} className="btn" title={`跳到节点管理市场，自动搜索 ${n}`}
+                              onClick={() => onInstallNode?.(n)}>
+                              去安装「{n}」
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <div className="ai-build-msg assistant">
+                <div className="avatar"><Sparkles size={14} /></div>
+                <div className="bubble">思考中…</div>
+              </div>
+            )}
+          </div>
+          {!chat.modelName && (
+            <p style={{ color: "var(--warning)", fontSize: 12, margin: "4px 0" }}>
+              未配置对话模型，请先到「设置 → 对话模型」添加。
+            </p>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px" }}>
+            <input type="checkbox" checked={direct} onChange={(e) => setDirect(e.target.checked)} />
+            精简直连（信任强模型一次到位，只调 1 次模型、不反复自修，最快不超时；推荐 Opus/GPT-4 等强模型开）
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px", opacity: direct ? 0.5 : 1 }}>
+            <input type="checkbox" checked={incremental} disabled={direct} onChange={(e) => setIncremental(e.target.checked)} />
+            增量模式（冻结现有画布，只在其上增量加模块；关精简直连后生效，多层校验自修，慢但对弱模型稳）
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px" }}>
+            <input type="checkbox" checked={advisor} onChange={(e) => setAdvisor(e.target.checked)} />
+            顾问模式（先用大白话讲清方案，你点「同意执行」再动画布，适合不熟节点的新手）
+          </label>
+          <div className="ai-build-input">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (canSend) doSend(); } }}
+              placeholder={ready ? "描述需求或要改的地方，回车发送（Shift+回车换行）" : "画布载入中…"}
+              rows={2}
+            />
+            <button className="btn primary" disabled={!canSend} onClick={doSend}>
+              <Sparkles size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />发送
+            </button>
+          </div>
+        </div>
+        <div className="ai-build-canvas">
+          <iframe ref={frameRef} src={src} title="ComfyUI 画布" />
+        </div>
+      </div>
+      {deleteSess && (
+        <ConfirmModal
+          title="删除会话"
+          message={`确认删除会话「${deleteSess.name}」？此进度将无法恢复。`}
+          confirmText="删除"
+          danger
+          onConfirm={doDeleteSession}
+          onCancel={() => setDeleteSess(null)}
+        />
+      )}
+    </PageShell>
+  );
+}
