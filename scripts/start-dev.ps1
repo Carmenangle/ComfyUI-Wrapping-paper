@@ -112,16 +112,19 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
       @{ Expression = { $_.speed -lt $SLOW -and $_.speed -ge 0 }; Ascending = $true }, `
       @{ Expression = { $_.speed }; Descending = $true }
 
-    & $backendPython -m pip install --upgrade pip
+    # 不单独升级 pip：升级 pip 会连默认源(国外)易卡住/失败，且非必需。装依赖各自指定源。
     $installed = $false
     foreach ($m in $ordered) {
       if ($m.speed -lt 0) { Write-Host "$($m.name) 测速连不上，跳过(仅在其余源都失败时才回头尝试)"; continue }
       $note = if ($m.speed -lt $SLOW) { "(慢源兜底)" } else { "" }
       Write-Host "用 $($m.name) 安装依赖 $note ..."
       if ($m.url) {
+        # 国内镜像(阿里云/清华)强制直连不走代理：系统开着翻墙代理时，走代理连国内源会把
+        # HTTPS 连接切断(SSLEOF/UNEXPECTED_EOF)。--proxy "" 覆盖 pip 继承的系统/环境代理。
         $host_ = ([Uri]$m.url).Host
-        & $backendPython -m pip install -i $m.url --trusted-host $host_ -r requirements.txt
+        & $backendPython -m pip install --proxy "" -i $m.url --trusted-host $host_ -r requirements.txt
       } else {
+        # 默认源(PyPI，国外)保留系统代理——国内网络多半要靠代理才连得上
         & $backendPython -m pip install -r requirements.txt
       }
       if ($LASTEXITCODE -eq 0) { $installed = $true; break }
@@ -133,7 +136,7 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
         Write-Host "兜底再试 $($m.name)..."
         if ($m.url) {
           $host_ = ([Uri]$m.url).Host
-          & $backendPython -m pip install -i $m.url --trusted-host $host_ -r requirements.txt
+          & $backendPython -m pip install --proxy "" -i $m.url --trusted-host $host_ -r requirements.txt
         } else {
           & $backendPython -m pip install -r requirements.txt
         }
