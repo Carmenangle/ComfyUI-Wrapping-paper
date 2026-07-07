@@ -47,30 +47,25 @@ function Wait-HttpOk([string]$Url, [int]$Seconds) {
   return $false
 }
 
-# 测某个 pip 源的下载速度(KB/s)：流式拉取其 simple 索引大页面，统计 $seconds 秒内下了多少字节。
-# 连不上/超时返回 0。用于「首次装依赖时优先挑快源」。
-function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 3) {
+# 测某个 pip 源的下载速度(KB/s)：用系统自带 curl 限时下载一个真实大 wheel，取 curl 报告的平均速度。
+# 返回值：>=0 = 可达；-1 = 连不上/失败。
+# 为何用 curl 而非 .NET(HttpWebRequest/HttpClient)：.NET 的 TLS 栈在部分机器上与某些镜像源(如清华)
+# 握手失败(SendFailure)误判为连不上；Windows 10/11 自带 curl.exe 的 TLS 兼容性好，与 pip 实际下载一致。
+function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 4) {
   try {
-    Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
-    $client = New-Object System.Net.Http.HttpClient
-    $client.Timeout = [TimeSpan]::FromSeconds($Seconds + 3)
-    $cts = New-Object System.Threading.CancellationTokenSource
-    $cts.CancelAfter([TimeSpan]::FromSeconds($Seconds))
-    $resp = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cts.Token).GetAwaiter().GetResult()
-    $stream = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-    $buffer = New-Object byte[] 65536
-    $total = 0
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($sw.Elapsed.TotalSeconds -lt $Seconds) {
-      try { $read = $stream.ReadAsync($buffer, 0, $buffer.Length, $cts.Token).GetAwaiter().GetResult() }
-      catch { break }
-      if ($read -le 0) { break }
-      $total += $read
-    }
-    $sw.Stop(); $client.Dispose()
-    if ($sw.Elapsed.TotalSeconds -le 0) { return 0 }
-    return [math]::Round(($total / 1024.0) / $sw.Elapsed.TotalSeconds, 0)
-  } catch { return 0 }
+    $curl = "$env:SystemRoot\System32\curl.exe"
+    if (-not (Test-Path -LiteralPath $curl)) { $curl = "curl" }  # 老系统回退 PATH 里的 curl
+    # --max-time 到点后 curl 主动截断(退出码 28)，但 %{speed_download} 已算好这段的平均字节/秒
+    $out = & $curl -s -o (Join-Path $env:TEMP "laf_probe.tmp") -w "%{http_code} %{speed_download}" --max-time $Seconds $Url 2>$null
+    $parts = ($out -split '\s+') | Where-Object { $_ -ne "" }
+    if ($parts.Count -lt 2) { return -1 }
+    $code = [int]($parts[0])
+    $bps = [double]($parts[1])
+    if ($code -lt 200 -or $code -ge 400) { return -1 }   # HTTP 错误=不可用
+    if ($bps -le 0) { return -1 }                         # 没下到任何数据=连不上
+    return [math]::Round($bps / 1024.0, 0)
+  } catch { return -1 }
+  finally { Remove-Item -LiteralPath (Join-Path $env:TEMP "laf_probe.tmp") -Force -ErrorAction SilentlyContinue }
 }
 
 # 首次运行装依赖：优先用随包附带的离线依赖(vendor/)离线安装，没有再联网装；都装好则跳过。
@@ -96,28 +91,31 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
   } else {
     # 联网装：先给各源测速，按速度排序，优先用 >=100KB/s 的快源；
     # 慢源(<100KB/s)排到最后，只有快源都装失败(或全都慢)时才用慢源兜底。
+    # 探针用真实大 wheel(numpy ~15MB)而非小索引页——小索引页会被 CDN 边缘缓存+gzip，
+    # 测出的是突发峰值(曾虚高到 600KB/s 实际只 25KB/s)；大文件走存储回源才是真实持续吞吐。
+    $probeRel = "packages/3f/6b/5610004206cf7f8e7ad91c5a85a8c71b2f2f8051a0c0c4d5916b76d6cbb2/numpy-1.26.4-cp311-cp311-win_amd64.whl"
     $mirrors = @(
-      @{ name = "默认源(PyPI)"; url = ""; probe = "https://pypi.org/simple/pip/" },
-      @{ name = "阿里云";       url = "https://mirrors.aliyun.com/pypi/simple/";        probe = "https://mirrors.aliyun.com/pypi/simple/pip/" },
-      @{ name = "清华源";       url = "https://pypi.tuna.tsinghua.edu.cn/simple/";       probe = "https://pypi.tuna.tsinghua.edu.cn/simple/pip/" }
+      @{ name = "默认源(PyPI)"; url = ""; probe = "https://files.pythonhosted.org/$probeRel" },
+      @{ name = "阿里云";       url = "https://mirrors.aliyun.com/pypi/simple/";        probe = "https://mirrors.aliyun.com/pypi/$probeRel" },
+      @{ name = "清华源";       url = "https://pypi.tuna.tsinghua.edu.cn/simple/";       probe = "https://pypi.tuna.tsinghua.edu.cn/$probeRel" }
     )
     $SLOW = 100  # KB/s 阈值：低于此视为慢源
-    Write-Host "测速各下载源(每个约 3 秒)..."
+    Write-Host "测速各下载源(每个约 4 秒)..."
     foreach ($m in $mirrors) {
-      $m.speed = Measure-MirrorSpeed $m.probe 3
-      $tag = if ($m.speed -eq 0) { "连不上" } elseif ($m.speed -lt $SLOW) { "慢" } else { "快" }
+      $m.speed = Measure-MirrorSpeed $m.probe 4
+      $tag = if ($m.speed -lt 0) { "连不上" } elseif ($m.speed -lt $SLOW) { "慢" } else { "快" }
       Write-Host ("  {0}: {1} KB/s ({2})" -f $m.name, $m.speed, $tag)
     }
-    # 排序：能连上的优先(speed>0)，其中快源(>=SLOW)按速度降序在前，慢源殿后；连不上的最后
+    # 排序：连不上的(-1)最后；能连上的里，快源(>=SLOW)按速度降序在前，慢源(含 0=极慢)殿后
     $ordered = $mirrors | Sort-Object -Property `
-      @{ Expression = { $_.speed -le 0 }; Ascending = $true }, `
-      @{ Expression = { $_.speed -lt $SLOW -and $_.speed -gt 0 }; Ascending = $true }, `
+      @{ Expression = { $_.speed -lt 0 }; Ascending = $true }, `
+      @{ Expression = { $_.speed -lt $SLOW -and $_.speed -ge 0 }; Ascending = $true }, `
       @{ Expression = { $_.speed }; Descending = $true }
 
     & $backendPython -m pip install --upgrade pip
     $installed = $false
     foreach ($m in $ordered) {
-      if ($m.speed -le 0) { Write-Host "$($m.name) 测速连不上，跳过(仅在其余源都失败时才回头尝试)"; continue }
+      if ($m.speed -lt 0) { Write-Host "$($m.name) 测速连不上，跳过(仅在其余源都失败时才回头尝试)"; continue }
       $note = if ($m.speed -lt $SLOW) { "(慢源兜底)" } else { "" }
       Write-Host "用 $($m.name) 安装依赖 $note ..."
       if ($m.url) {
@@ -129,9 +127,9 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
       if ($LASTEXITCODE -eq 0) { $installed = $true; break }
       Write-Host "$($m.name) 安装失败，切换下一个源..."
     }
-    # 兜底：所有测得速度的源都失败了，再试当初连不上的源(可能只是测速瞬时抖动)
+    # 兜底：所有连得上的源都装失败了，再试当初连不上的源(可能只是测速瞬时抖动)
     if (-not $installed) {
-      foreach ($m in ($ordered | Where-Object { $_.speed -le 0 })) {
+      foreach ($m in ($ordered | Where-Object { $_.speed -lt 0 })) {
         Write-Host "兜底再试 $($m.name)..."
         if ($m.url) {
           $host_ = ([Uri]$m.url).Host
