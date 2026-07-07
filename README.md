@@ -10,13 +10,13 @@
 
 ```powershell
 # 后端
-cd D:\tool\ComfyUI\local-ai-frontend\backend
+cd D:\tool\ComfyUI\ComfyUI-Wrapping-paper\backend
 python -m venv .venv; .\.venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8010 --reload-dir app
 
 # 前端
-cd D:\tool\ComfyUI\local-ai-frontend\frontend
+cd D:\tool\ComfyUI\ComfyUI-Wrapping-paper\frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
@@ -77,7 +77,7 @@ CivitAI / CivArchive / HuggingFace 浏览 + 下载，跨 tab 共享的下载进�
 ## 架构
 
 ```text
-local-ai-frontend/
+ComfyUI-Wrapping-paper/
   backend/    FastAPI：ai(对话/搭流/知识库) · rag(Chroma) · generation · comfyui_client · models · node_manager
   frontend/   React + Vite：views(各功能页) · lib(状态机/编排) · api · components
   comfyui-ext/  laf_lock 扩展：postMessage 协议嵌入 ComfyUI 画布（laf_lock 生图锁定 / laf_full 搭流）

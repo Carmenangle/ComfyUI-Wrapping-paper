@@ -91,7 +91,7 @@ export function App() {
     <div className="layout">
       <Lightbox />
       <aside className="sidebar">
-        <div className="brand">Local AI Frontend</div>
+        <div className="brand">ComfyUI-Wrapping-paper</div>
         {NAV_GROUPS.map((g) => (
           <div className="nav-group" key={g.label}>
             <div className="nav-group-title">{g.label}</div>
