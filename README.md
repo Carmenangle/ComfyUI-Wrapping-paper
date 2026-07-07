@@ -1,4 +1,4 @@
-# Local AI ComfyUI Frontend
+# ComfyUI-Wrapping-paper
 
 本地单机前端，把 ComfyUI 封装成更好用的创作台：**工作流模板化 + AI 智能编排**、对话生图、AI 搭工作流、资产库/知识库（RAG）、节点管理、模型下载一体。后端 FastAPI，前端 React + Vite，通过 iframe 嵌入本机 ComfyUI 画布。
 
