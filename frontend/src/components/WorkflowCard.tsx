@@ -273,6 +273,15 @@ export function WorkflowCard({
                     <Sparkles size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     AI 编排
                   </button>
+                  {fullWorkflow && (
+                    <button className="btn" title="把此工作流写入 AI 搭工作流页画布，新建会话继续编辑"
+                      onClick={() => {
+                        try { localStorage.setItem("laf_pending_build_graph", JSON.stringify(fullWorkflow)); } catch { /* 太大则忽略 */ }
+                        window.location.hash = "#/ai-build";
+                      }}>
+                      在搭工作流页编辑
+                    </button>
+                  )}
                 </div>
               </div>
             )}

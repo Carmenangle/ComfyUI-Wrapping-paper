@@ -487,15 +487,22 @@ body {
   width: 100%;
   box-sizing: border-box;
   font-family: inherit;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
   resize: vertical;
   border: 1px solid var(--accent);
   border-radius: 8px;
-  padding: 8px;
+  padding: 12px;
   background: var(--surface);
   color: var(--text);
   margin-bottom: 8px;
+  min-height: 320px;
+}
+
+/* 编辑态气泡放宽到几乎占满，避免方案文本挤在窄气泡里难编辑 */
+.ai-build-msg .bubble.bubble-editing {
+  max-width: 100%;
+  width: 100%;
 }
 .sess-dropdown {
   position: absolute;

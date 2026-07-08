@@ -348,6 +348,7 @@ export interface BuildResult {
   errors: string[];
   warnings?: string[];   // 非阻断提示（如断链孤岛：节点还没接进主链）
   missing_nodes?: string[];  // 本机没装、已从图里移除的节点类型（供「去安装」按钮）
+  alternatives?: Record<string, string[]>;  // {缺失节点: [本机同类平替...]}（供「用平替重搭」）
 }
 
 // 按需求自动搭工作流：检索节点→AI 生成→校验重试→（可选）落盘到 workflowDir

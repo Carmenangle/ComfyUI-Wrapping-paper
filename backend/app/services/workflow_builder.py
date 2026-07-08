@@ -358,23 +358,25 @@ def fill_combo_defaults(graph: dict, object_info: dict) -> int:
     return changed
 
 
-def interface_sheet(node_names: list[str], object_info: dict, max_nodes: int = 60) -> str:
+def interface_sheet(node_names: list[str], object_info: dict, max_nodes: int = 60,
+                    priority: set | None = None) -> str:
     """把一批节点的**真实输入/输出接口**拼成精简速查表，喂给 AI 搭工作流。
 
     这是接线正确性的关键：只有节点名+文字描述时，AI 不知道某节点的口叫什么、输出什么类型，
     只能猜（表现为选错开关节点、把 BOOLEAN 接进 IMAGE 口）。给出真实接口后 AI 才能连对。
     每节点一行：  节点名: in 口名(类型)/widget名(类型)... => out 输出0,输出1...
     连线口标 *、widget 标 =；控量到 max_nodes 个节点，超出省略。
+    priority：方案点名的节点集，永远输出、不受 max_nodes 截断（治「点名节点排末尾被截掉」）。
     """
+    priority = priority or set()
     lines: list[str] = []
     seen = 0
     for name in node_names:
         schema = object_info.get(name)
         if not schema:
             continue
-        if seen >= max_nodes:
-            lines.append(f"…（还有 {len(node_names) - seen} 个节点略）")
-            break
+        if seen >= max_nodes and name not in priority:  # 点名节点豁免截断
+            continue
         iface = node_interface(schema)
         ins = []
         for l in iface["required_links"]:

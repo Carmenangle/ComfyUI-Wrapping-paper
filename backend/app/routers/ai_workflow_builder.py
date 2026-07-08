@@ -183,23 +183,65 @@ def _with_control_flow(names: list[str], object_info: dict) -> list[str]:
     return out
 
 
+def _named_nodes_in_text(text: str, object_info: dict) -> list[str]:
+    """从需求/方案文本里抽出被点名的、本机真实存在的节点 class_type。
+    治「顾问方案点名了 Llama-cpp 等节点，但执行阶段长文本检索没召回→接口表没有→AI 省略整条链路」。
+    匹配两路：①class_type 直接出现在文本里；②display_name(schema.display_name)出现在文本里。
+    命中的节点应置顶注入接口表并豁免截断，确保方案点名的节点 AI 一定看得到接口。"""
+    if not text:
+        return []
+    low = text.lower()
+    hits: list[str] = []
+    for ct, schema in object_info.items():
+        if not isinstance(ct, str):
+            continue
+        disp = ""
+        if isinstance(schema, dict):
+            disp = str(schema.get("display_name") or "")
+        # class_type 较长(≥4)才按子串匹配，避免短名误命中；display_name 完整匹配
+        matched = (len(ct) >= 4 and ct.lower() in low) or (len(disp) >= 4 and disp.lower() in low)
+        if matched:
+            hits.append(ct)
+    return hits
+
+
+def _prioritize(hit_names: list[str], need: str, object_info: dict) -> list[str]:
+    """把方案/需求点名的节点置顶到接口表最前（豁免 60 截断），其余保序去重。"""
+    named = _named_nodes_in_text(need, object_info)
+    if not named:
+        return hit_names
+    seen = set()
+    out: list[str] = []
+    for n in [*named, *hit_names]:
+        if n not in seen:
+            out.append(n)
+            seen.add(n)
+    return out
+
+
+
 _BUILD_SYSTEM = (
-    "你是 ComfyUI 工作流搭建器。根据用户需求和给定的【可用节点清单】，**一次性通盘规划并生成一个"
-    "完整、可直接运行的** ComfyUI API prompt 格式工作流（不是片段，是从加载模型到保存输出的整条链）。\n"
+    "你是资深 ComfyUI 工作流专家。根据用户需求，用你的专业判断**一次性通盘规划并生成一个"
+    "完整、专业、可直接运行的** ComfyUI API prompt 格式工作流（不是片段，是从加载模型到保存输出的整条链）。\n"
     "格式：JSON 对象 {\"节点id\": {\"class_type\": \"节点名\", \"inputs\": {...}}}。\n"
     "连线规则：inputs 里某口的值若是 [\"上游节点id\", 输出序号] 表示接线；否则是 widget 字面值。\n"
-    "搭建原则（必接口优先）：\n"
-    "- 先把每个节点 required 里必须接线的口(MODEL/LATENT/CONDITIONING 等大写类型)连对，形成骨架；\n"
-    "- required 里的基础类型/下拉口填合理 widget 值；\n"
-    "- optional 口可接可不接，按需求决定（如采样器不接 latent_image 走文生图）。\n"
-    "- **只用【节点真实接口】里列出的节点**——那份清单就是本机全部可用节点，不在里面的一律视为没装，"
-    "绝不虚构或凭印象写节点名(如别写 LlamaCPP/Qwen2VL 这类，看清单里真实的反推节点叫什么)。"
-    "确实找不到对应能力的节点，就省略那部分功能，别编。\n"
-    "完整性要求（务必自检）：\n"
-    "- 整图必须有输出节点(如 SaveImage)，且主链从模型加载一路连通到它，不留断链孤岛；\n"
+    "【专业标准·务必按最佳实践搭，别偷工减料搭最基础版】：\n"
+    "- 按模型架构选正确的加载方式：SDXL/SD1.5 等一体式模型用 CheckpointLoaderSimple；"
+    "而 Flux、SD3、以及 Anima/UNET 分离式模型，应走 **UNETLoader(单独加载 UNET) + DualCLIPLoader/CLIPLoader(单独加载CLIP) + VAELoader(单独加载VAE)** 的分离式架构，"
+    "这是这类模型的正确用法，绝不要图省事套用 checkpoint 一体式。\n"
+    "- 需求里提到的每一项能力（如反推、图生图、放大、面部修复）都要在图里真实实现对应链路，不许简化掉。"
+    "图生图要有 VAEEncode 把参考图编码进 latent；反推要有对应的看图出词节点链。\n"
+    "- 先把必接线口(MODEL/LATENT/CONDITIONING 等大写类型)连成骨架，再填 widget，optional 口按需求接。\n"
+    "【节点名以清单为准（防止写错名字），但你的专业能力不受清单限制】：\n"
+    "- 【可用节点真实接口】清单给出本机节点的**真实 class_type 和接口**，接线时口名/类型严格照它，"
+    "写节点名也以清单里的真实名为准（别凭印象写 LlamaCPP/Qwen2VL 这种可能不对的名字）。\n"
+    "- 若你要用的某个节点清单里没列出：先在清单里找**功能同类的替代节点**（如某种 UNET 加载器、某种反推节点）；"
+    "清单里确实找不到任何能实现该能力的节点时，才省略该部分，并按你的专业判断把其余部分搭到最完整。\n"
+    "- 不要因为清单没列全就退化成最简单的工作流——清单是查真实节点名用的，不是你能力的上限。\n"
+    "完整性自检：\n"
+    "- 整图必须有输出节点(如 SaveImage)，主链从模型加载一路连通到它，不留断链孤岛；\n"
     "- 每个节点的必接线口都要接上；用到开关/聚合节点(如 Any Switch (rgthree)，动态输入口 "
     "any_01,any_02,…)时，务必既接上游各路来源、又把输出接给下游，不能只接一头；\n"
-    "- 【节点真实接口】给出了每个节点的口名和类型，严格照它接线，类型要匹配(* 表示任意类型)。\n"
     "只输出 JSON，不要解释、不要 markdown 代码块围栏。"
 )
 
@@ -247,7 +289,9 @@ def build(req: BuildRequest) -> dict:
     for p in packs:
         hit_names.extend(p.get("node_names", []))
     hit_names = _with_control_flow(hit_names, object_info)  # 强制补入 Any Switch 等控制流节点
-    sheet = workflow_builder.interface_sheet(hit_names, object_info)
+    named = _named_nodes_in_text(req.need, object_info)     # 方案点名的真实节点
+    hit_names = _prioritize(hit_names, req.need, object_info)
+    sheet = workflow_builder.interface_sheet(hit_names, object_info, priority=set(named))
 
     # 3. AI 生成 → 校验 → 有错回喂重连
     #    有 current_graph 时，让 AI 在现有画布基础上按新需求增量修改并输出完整新图。
@@ -330,7 +374,29 @@ class ModuleRequest(EmbedModelReq):
     need: str = ""                     # 本模块需求，如"加图生图分支"
     comfy_url: str = "http://127.0.0.1:8188"
     current_graph: dict = {}           # 当前冻结图（AI 不许改，只在其上加模块）
-    max_retries: int = 4
+    max_retries: int = 2               # 增量模式重试：慢中转下每轮 opus 都慢，4 次易累计爆 240s→降 2(首次+1次纠错，配 slim 通常够)
+
+
+def _slim_graph_for_prompt(base: dict) -> dict:
+    """把当前图瘦身成「给 AI 看的表示」：保留 id/class_type/所有连线，省掉 widget 标量值。
+    治增量模式每轮塞完整图→节点多就 prompt 爆炸/超时。连线拓扑完整保留(中间插入/拆边重连靠它)，
+    只把与接线无关的 widget 字面值(seed/steps/cfg/text/ckpt_name 等)替换为占位，长文本截断。
+    ⚠只影响发给模型的表示，实际合并用前端另传的完整图，不受影响。"""
+    slim: dict = {}
+    for nid, node in (base or {}).items():
+        if not isinstance(node, dict):
+            slim[nid] = node
+            continue
+        new_inputs = {}
+        for k, v in (node.get("inputs") or {}).items():
+            if isinstance(v, list) and len(v) == 2 and isinstance(v[0], (str, int)) and isinstance(v[1], int):
+                new_inputs[k] = v                       # 连线 [id, 序号]：原样保留（拓扑关键）
+            elif isinstance(v, str) and len(v) > 24:
+                new_inputs[k] = v[:24] + "…"             # 长文本(提示词等)截断
+            else:
+                new_inputs[k] = "…"                       # 其它 widget 标量：占位，接线无关
+        slim[nid] = {"class_type": node.get("class_type"), "inputs": new_inputs}
+    return slim
 
 
 _MODULE_SYSTEM = (
@@ -391,11 +457,11 @@ def build_module(req: ModuleRequest) -> dict:
     sheet = workflow_builder.interface_sheet(hit_names, object_info, max_nodes=40)  # 增量加一个模块，40 个够
 
     base = req.current_graph or {}
-    # 增量模式 prompt 瘦身：不塞冗长文字 catalog（接口表已给真实口/类型，长描述冗余），
-    # 每轮只发【当前图 + 接口表】。省 ~万字符/轮，治"搭几轮就 502/超时"（大请求触发中转上游超时）。
+    # 增量模式 prompt 瘦身：①不塞冗长文字 catalog（接口表已给真实口/类型）②当前图只发结构+连线，
+    # widget 标量值省略为 …（接线无关）。治"节点多就 prompt 爆炸→502/超时"。合并用前端另传的完整图。
     convo = (
-        f"新需求：{req.need}\n\n【当前工作流(API格式，冻结)】\n"
-        + json.dumps(base, ensure_ascii=False)
+        f"新需求：{req.need}\n\n【当前工作流(结构+连线，冻结；widget 值已省略为 …，你只需接线不用管它们)】\n"
+        + json.dumps(_slim_graph_for_prompt(base), ensure_ascii=False)
         + f"\n\n【可用节点及真实接口（务必据此接线，口名/类型不得臆造）】\n"
         + "说明：in[] 里 * 是需接线的口(带类型)、? 是可选、= 是填字面值的 widget；out[] 是输出序号:类型。\n"
         + sheet
@@ -473,7 +539,9 @@ def build_direct(req: DirectRequest) -> dict:
     for p in packs:
         hit_names.extend(p.get("node_names", []))
     hit_names = _with_control_flow(hit_names, object_info)
-    sheet = workflow_builder.interface_sheet(hit_names, object_info)
+    named = _named_nodes_in_text(req.need, object_info)  # 方案点名的真实节点
+    hit_names = _prioritize(hit_names, req.need, object_info)  # 置顶
+    sheet = workflow_builder.interface_sheet(hit_names, object_info, priority=set(named))
 
     convo = (
         f"需求：{req.need}\n\n【可用节点及真实接口（务必据此接线，口名/类型不得臆造）】\n"
@@ -515,11 +583,13 @@ def build_direct(req: DirectRequest) -> dict:
         # 第 2 次仍错：如实返回，不再拖时间
         alts = node_index.suggest_alternatives(cfg, missing, set(object_info)) if missing else {}
         return {"ok": False, "graph": graph, "errors": last_errors,
-                "warnings": _missing_hint(missing, alts), "missing_nodes": missing}
+                "warnings": _missing_hint(missing, alts), "missing_nodes": missing,
+                "alternatives": alts}
 
     alts = node_index.suggest_alternatives(cfg, missing, set(object_info)) if missing else {}
     warnings = workflow_builder.audit_graph(graph, object_info) + _missing_hint(missing, alts)
-    return {"ok": True, "graph": graph, "errors": [], "warnings": warnings, "missing_nodes": missing}
+    return {"ok": True, "graph": graph, "errors": [], "warnings": warnings, "missing_nodes": missing,
+            "alternatives": alts}
 
 
 class PlanRequest(EmbedModelReq):
@@ -533,6 +603,9 @@ _PLAN_SYSTEM = (
     "根据用户需求（和当前画布，若有）+ 给定的可用节点，输出一段**给人看的中文方案**，包含：\n"
     "1. 这个工作流是做什么的（一句话目标）；\n"
     "2. 分几步、每步大意（如：加载模型 → 写提示词 → 采样出图 → 保存），用简单序号列出；\n"
+    "   —— 按模型架构给专业方案：SDXL/SD1.5 一体式用 Checkpoint 加载；Flux/SD3/Anima 等分离式模型"
+    "应走 UNET 加载器 + 单独 CLIP + 单独 VAE 的分离式架构，别图省事套 checkpoint 一体式。"
+    "需求提到的每项能力(反推/图生图/放大等)都要在方案里有对应步骤，别简化成最基础版。\n"
     "3. 会用到哪些关键节点，各自作用（用节点显示名+一句话，别堆术语）——正式方案里点名的节点"
     "**必须来自给定的【本机真实节点】清单**，绝不凭印象编节点名(如不要写 LlamaCPP 这种本机没有的)；\n"
     "4. 若在现有画布上改，说清改动了什么、为什么这么接。\n"

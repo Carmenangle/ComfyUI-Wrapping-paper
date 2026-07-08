@@ -12,7 +12,7 @@ import { fullUrl, postToFrame, isLafMessage } from "../lib/lafLock";
 
 // 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
 // pendingNeed=点同意时真正搭建用的需求(原需求+方案)；planText=纯方案文本，供「编辑」填回输入框改。
-interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; editing?: boolean; missingNodes?: string[]; }
+interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; editing?: boolean; missingNodes?: string[]; alternatives?: Record<string, string[]>; retryNeed?: string; }
 
 // AI 搭工作流（双栏）：左栏多轮对话与 AI 探讨，右栏完整功能 ComfyUI 画布。
 // AI 每轮读回右侧画布作上下文 → 输出完整 graph → 写入右侧；用户可在画布里手动接着改。
@@ -24,9 +24,9 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [note, setNote] = useState("");
-  const [incremental, setIncremental] = useState(true);  // 增量模式：冻结现有图只加模块
+  const [incremental, setIncremental] = useState(false);  // 增量模式：冻结现有图只加模块（与精简直连互斥，初始关，选骨架时自动开）
   const [advisor, setAdvisor] = useState(false);  // 顾问模式：先出人话方案+确认，再执行（面向小白）
-  const [direct, setDirect] = useState(true);  // 精简直连：信任强模型一次到位，只调1次模型，最快（默认开）
+  const [direct, setDirect] = useState(true);  // 精简直连：信任强模型一次到位，只调1次模型，最快（默认开，与增量互斥）
   const [skeletons, setSkeletons] = useState<Skeleton[]>([]);
   const [loadingSkel, setLoadingSkel] = useState("");  // 正在载入的骨架 id
   // 搭建会话（进度保存 + 多开）
@@ -83,7 +83,10 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       const r = await skeletonGraph(s.id, settings.workflowDir);
       postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
       skeletonIdRef.current = s.id;
-      push("assistant", `已载入骨架「${s.name}」(${s.node_count} 节点)作为底座。接下来告诉我要改什么，我会在它基础上增量调整，不会推倒重来。`);
+      // 选了骨架底座 → 默认切增量模式（在此底座上增量加模块，而非精简直连推倒重搭）
+      setDirect(false);
+      setIncremental(true);
+      push("assistant", `已载入骨架「${s.name}」(${s.node_count} 节点)作为底座，已切到增量模式。接下来告诉我要改什么，我会在它基础上增量调整，不会推倒重来。`);
     } catch (e) {
       setNote("载入骨架失败：" + (e as Error).message);
     } finally {
@@ -97,11 +100,26 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
 
   useEffect(() => { refreshSessions(); }, []);
 
-  // 首次画布就绪后，若本机上次留有会话 id，自动恢复该会话（对话 + 画布图）
+  // 首次画布就绪后：优先处理「从生图对话 /w 带过来的工作流」，否则恢复上次会话
   const restoredRef = useRef(false);
   useEffect(() => {
     if (!ready || restoredRef.current) return;
     restoredRef.current = true;
+    // 1) 生图对话点「在搭工作流页编辑」带来的 graph → 新建会话装入（不覆盖既有进度）
+    const pending = localStorage.getItem("laf_pending_build_graph");
+    if (pending) {
+      localStorage.removeItem("laf_pending_build_graph");
+      try {
+        const graph = JSON.parse(pending);
+        sessionId && setSessionId("");        // 清当前会话 id → 存时新建，不覆盖用户正在搭的
+        localStorage.removeItem(LAST_KEY);
+        postToFrame(frameRef.current?.contentWindow, "load", { workflow: graph });
+        push("assistant", "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。");
+        setTimeout(() => saveProgress(true), 800);  // load 后自动存成新会话
+        return;
+      } catch { /* 解析失败则走正常恢复 */ }
+    }
+    // 2) 否则恢复上次会话
     const last = localStorage.getItem(LAST_KEY);
     if (last) restoreSession(last);
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,17 +249,41 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
           currentGraph: current, save: false,  // 迭代中途不落盘，只回图写画布
         });
     const miss = r.missing_nodes && r.missing_nodes.length ? r.missing_nodes : undefined;
+    const alts = r.alternatives && Object.keys(r.alternatives).length ? r.alternatives : undefined;
     if (r.ok && r.graph && Object.keys(r.graph).length) {
       postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
       const warn = r.warnings && r.warnings.length
         ? "\n提示（不影响写入，可继续调整）：\n" + r.warnings.join("\n")
         : "";
       setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant",
-        text: "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。" + warn, missingNodes: miss }]);
+        text: "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。" + warn,
+        missingNodes: miss, alternatives: alts, retryNeed: need }]);
     } else {
       const warn = r.warnings && r.warnings.length ? "\n" + r.warnings.join("\n") : "";
       setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant",
-        text: "没能生成合法工作流：\n" + (r.errors.join("\n") || "未知错误") + warn, missingNodes: miss }]);
+        text: "没能生成合法工作流：\n" + (r.errors.join("\n") || "未知错误") + warn,
+        missingNodes: miss, alternatives: alts, retryNeed: need }]);
+    }
+  };
+
+  // 用本机平替节点重新生成：把「缺失节点→本机平替」映射拼进需求，让 AI 改用平替重搭
+  const retryWithAlternatives = async (alts: Record<string, string[]>, need: string) => {
+    const lines = Object.entries(alts)
+      .filter(([, v]) => v && v.length)
+      .map(([miss, subs]) => `- 「${miss}」本机没装，改用本机已有的：${subs.slice(0, 3).join(" 或 ")}`);
+    if (lines.length === 0) {
+      push("assistant", "知识库里没找到这些缺失节点的本机平替，建议去节点管理安装原节点。");
+      return;
+    }
+    const newNeed = `${need}\n\n【重要·节点替换要求】以下节点本机未安装，请改用括号内的本机已装平替节点重新搭建，不要再用未装的：\n${lines.join("\n")}`;
+    setBusy(true);
+    setNote("");
+    try {
+      await doExecute(newNeed);
+    } catch (e) {
+      push("assistant", "请求失败：" + (e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -364,7 +406,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
             {msgs.map((m) => (
               <div key={m.id} className={`ai-build-msg ${m.role}`}>
                 <div className="avatar">{m.role === "user" ? "我" : <Sparkles size={14} />}</div>
-                <div className="bubble">
+                <div className={`bubble${m.editing ? " bubble-editing" : ""}`}>
                   {m.editing ? (
                     // 编辑态：直接在方案气泡里改文本，改完「保存并执行」照改后方案搭
                     <>
@@ -420,6 +462,13 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
                               去安装「{n}」
                             </button>
                           ))}
+                          {m.alternatives && Object.values(m.alternatives).some((v) => v && v.length) && m.retryNeed && (
+                            <button className="btn primary" disabled={busy}
+                              title="查节点知识库里的本机同类节点，改用平替重新生成一份方案"
+                              onClick={() => retryWithAlternatives(m.alternatives!, m.retryNeed!)}>
+                              <Sparkles size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />用本机平替重搭
+                            </button>
+                          )}
                         </div>
                       )}
                     </>
@@ -439,12 +488,14 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
               未配置对话模型，请先到「设置 → 对话模型」添加。
             </p>
           )}
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px" }}>
-            <input type="checkbox" checked={direct} onChange={(e) => setDirect(e.target.checked)} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px", opacity: incremental ? 0.5 : 1 }}>
+            <input type="checkbox" checked={direct} disabled={incremental}
+              onChange={(e) => { setDirect(e.target.checked); if (e.target.checked) setIncremental(false); }} />
             精简直连（信任强模型一次到位，只调 1 次模型、不反复自修，最快不超时；推荐 Opus/GPT-4 等强模型开）
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px", opacity: direct ? 0.5 : 1 }}>
-            <input type="checkbox" checked={incremental} disabled={direct} onChange={(e) => setIncremental(e.target.checked)} />
+            <input type="checkbox" checked={incremental} disabled={direct}
+              onChange={(e) => { setIncremental(e.target.checked); if (e.target.checked) setDirect(false); }} />
             增量模式（冻结现有画布，只在其上增量加模块；关精简直连后生效，多层校验自修，慢但对弱模型稳）
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", margin: "0 0 6px" }}>

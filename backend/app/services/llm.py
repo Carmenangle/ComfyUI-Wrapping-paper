@@ -48,6 +48,8 @@ def build_model(base_url: str, api_key: str, model: str,
     if p:
         import httpx
         kw["http_client"] = httpx.Client(proxy=p, timeout=120)  # 仅显式代理时注入
+    else:
+        kw["timeout"] = 200  # 不带代理也设单次超时。中转慢时单次搭建(复杂prompt+长JSON)可能60-120s，给足200s(精简直连只调1次，前端240s内)
     return init_chat_model(model, **kw)
 
 
