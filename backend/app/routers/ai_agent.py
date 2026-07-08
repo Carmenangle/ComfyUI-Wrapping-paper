@@ -25,6 +25,7 @@ class ImageAgentRequest(EmbedModelReq):
     proxy_url: str = ""                # 联网搜索代理（search_inspiration 工具用）
     style: str = ""                    # 用户手动选的提示词风格 sd/gpt/banana/""(自动)
     style_template: str = ""           # 自定义风格存档的整段内容（非空时优先于 style）
+    agent_id: str = ""                 # 多 Agent：选中的 Agent 预设 id（空=内置默认行为）
 
 
 @router.post("/image-agent")
@@ -48,6 +49,7 @@ def image_agent(req: ImageAgentRequest) -> StreamingResponse:
         req.size, req.output_dir, req.repo_id or req.thread_id,
         req.embed_base_url, req.embed_api_key, req.embed_model,
         req.message_id, req.proxy_url, req.style, req.style_template,
+        req.agent_id,
     )
 
     return sse_response(lambda: agent_runner.drain(q))

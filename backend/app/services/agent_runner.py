@@ -59,7 +59,7 @@ def run_stream(thread_id: str, message: str, images: list[str] | None,
                size: str, output_dir: str, repo_id: str,
                embed_base: str, embed_key: str, embed_model: str,
                message_id: str = "", proxy_url: str = "", style: str = "",
-               style_template: str = "") -> "queue.Queue":
+               style_template: str = "", agent_id: str = "") -> "queue.Queue":
     """启动后台线程跑 agent，返回事件队列（None 为结束哨兵）。
 
     线程独立于调用方：即便 SSE 连接断开、无人读队列，线程仍跑完并把最终文本
@@ -81,7 +81,7 @@ def run_stream(thread_id: str, message: str, images: list[str] | None,
                 size, output_dir, repo_id,
                 embed_base, embed_key, embed_model,
                 cancel_event=cancel_event, proxy_url=proxy_url, style=style,
-                style_template=style_template,
+                style_template=style_template, agent_id=agent_id,
             ):
                 if ev.get("interrupted"):
                     interrupted["v"] = True

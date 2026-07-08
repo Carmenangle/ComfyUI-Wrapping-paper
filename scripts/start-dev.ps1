@@ -68,6 +68,27 @@ function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 4) {
   finally { Remove-Item -LiteralPath (Join-Path $env:TEMP "laf_probe.tmp") -Force -ErrorAction SilentlyContinue }
 }
 
+# 用国内镜像装依赖：临时彻底清空代理(环境变量 + NO_PROXY=*)再装，装完恢复。
+# 为何要清环境变量：仅 --proxy "" 不够——urllib3 仍会读 HTTP(S)_PROXY 环境变量或系统代理，
+# 走翻墙代理连国内源会把 HTTPS 切断(SSLEOF)。清空环境变量 + NO_PROXY=* 才真正直连。
+# $backendPython 为全局；$reqPath 由调用方传入。返回 $true/$false（是否成功）。
+function Install-FromMirror([string]$IndexUrl, [string]$TrustedHost) {
+  $saved = @{}
+  foreach ($v in 'HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy') {
+    $saved[$v] = [Environment]::GetEnvironmentVariable($v)
+    [Environment]::SetEnvironmentVariable($v, $null)
+  }
+  $savedNo = $env:NO_PROXY
+  $env:NO_PROXY = "*"
+  try {
+    & $backendPython -m pip install --proxy "" -i $IndexUrl --trusted-host $TrustedHost -r requirements.txt
+    return ($LASTEXITCODE -eq 0)
+  } finally {
+    foreach ($v in $saved.Keys) { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
+    $env:NO_PROXY = $savedNo
+  }
+}
+
 # 首次运行装依赖：优先用随包附带的离线依赖(vendor/)离线安装，没有再联网装；都装好则跳过。
 # 用「完成标记文件」判断是否真装好——只看 python.exe 存在会误判：上次装到一半被关掉，
 # venv 建好了但依赖没装全，下次就会跳过安装导致后端起不来。无标记 = 未完成 → 清残留重装。
@@ -119,15 +140,14 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
       $note = if ($m.speed -lt $SLOW) { "(慢源兜底)" } else { "" }
       Write-Host "用 $($m.name) 安装依赖 $note ..."
       if ($m.url) {
-        # 国内镜像(阿里云/清华)强制直连不走代理：系统开着翻墙代理时，走代理连国内源会把
-        # HTTPS 连接切断(SSLEOF/UNEXPECTED_EOF)。--proxy "" 覆盖 pip 继承的系统/环境代理。
-        $host_ = ([Uri]$m.url).Host
-        & $backendPython -m pip install --proxy "" -i $m.url --trusted-host $host_ -r requirements.txt
+        # 国内镜像：清代理直连（见 Install-FromMirror）
+        $ok = Install-FromMirror $m.url ([Uri]$m.url).Host
       } else {
         # 默认源(PyPI，国外)保留系统代理——国内网络多半要靠代理才连得上
         & $backendPython -m pip install -r requirements.txt
+        $ok = ($LASTEXITCODE -eq 0)
       }
-      if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+      if ($ok) { $installed = $true; break }
       Write-Host "$($m.name) 安装失败，切换下一个源..."
     }
     # 兜底：所有连得上的源都装失败了，再试当初连不上的源(可能只是测速瞬时抖动)
@@ -135,12 +155,12 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
       foreach ($m in ($ordered | Where-Object { $_.speed -lt 0 })) {
         Write-Host "兜底再试 $($m.name)..."
         if ($m.url) {
-          $host_ = ([Uri]$m.url).Host
-          & $backendPython -m pip install --proxy "" -i $m.url --trusted-host $host_ -r requirements.txt
+          $ok = Install-FromMirror $m.url ([Uri]$m.url).Host
         } else {
           & $backendPython -m pip install -r requirements.txt
+          $ok = ($LASTEXITCODE -eq 0)
         }
-        if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+        if ($ok) { $installed = $true; break }
       }
     }
     if (-not $installed) { throw "依赖安装失败：默认源/阿里云/清华源均未成功，请检查网络" }

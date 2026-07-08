@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Boxes,
+  Bot,
   CornerDownRight,
   MessagesSquare,
   Archive,
@@ -21,7 +22,8 @@ import { ConfirmModal } from "../components/Modal";
 import { StylePresetModal } from "../components/StylePresetModal";
 import { UserMessage, AssistantMessage, InspirationCard, PortsPlanCard } from "../components/chat/ChatMessages";
 import { ModelSwitcher, SizeSwitcher, ChatEmptyLanding } from "../components/chat/ChatControls";
-import { comfyStatus, startComfy } from "../api/comfyui";
+import { comfyStatus, startComfy, localViewUrl } from "../api/comfyui";
+import { listAgents, type Agent } from "../api/agents";
 import { listTemplates, type Template } from "../api/workflows";
 import { indexDocument } from "../api/ai";
 import { calcSize } from "../lib/viewRouting";
@@ -80,6 +82,8 @@ export function ChatView({
   const [aspect, setAspect] = useState<string>("1:1");
   const [resTier, setResTier] = useState<string>("1k");
   const [showStylePresets, setShowStylePresets] = useState(false);  // 风格存档管理弹窗
+  const [agents, setAgents] = useState<Agent[]>([]);  // 多 Agent 列表（对话切换用）
+  useEffect(() => { listAgents().then((a) => setAgents(a.filter((x) => x.enabled))).catch(() => {}); }, []);
   const activeChat = settings.chatModels.find((m) => m.id === chatModelId) || settings.chatModels[0];
   const chat = { baseUrl: activeChat?.baseUrl || "", apiKey: activeChat?.apiKey || "", modelName: activeChat?.modelName || "" };
   // 当前选中的生图模型（底部下拉），传给 agent 的生图工具
@@ -199,6 +203,20 @@ export function ChatView({
       <div className="chat-layout">
         <div className="chat-col">
           <div className="chat-stream" ref={streamRef} onScroll={onStreamScroll}>
+            {settings.chatBgPath && (
+              <div
+                className="chat-bg"
+                style={{
+                  backgroundImage: `url(${localViewUrl(settings.chatBgPath)})`,
+                  backgroundSize: (settings.chatBgFit ?? "cover") === "cover"
+                    ? `${(settings.chatBgScale ?? 1) * 100}%`
+                    : "contain",
+                  backgroundPosition: `${settings.chatBgPosX ?? 50}% ${settings.chatBgPosY ?? 50}%`,
+                  backgroundRepeat: "no-repeat",
+                  opacity: settings.chatBgOpacity ?? 0.15,
+                }}
+              />
+            )}
             {messages.length === 0 && <ChatEmptyLanding />}
             {messages.map((m) =>
               m.role === "user" ? (
@@ -347,6 +365,19 @@ export function ChatView({
               update({ imageStyle: id === "none" ? "" : id });
             }}
           />
+          {agents.length > 0 && (
+            <ModelSwitcher
+              icon={<Bot size={18} />}
+              label="智能体"
+              items={[
+                { id: "none", name: "默认（内置）" },
+                ...agents.map((a) => ({ id: a.id, name: a.name || "未命名" })),
+              ]}
+              activeId={settings.activeAgentId || "none"}
+              emptyHint="智能体"
+              onPick={(id) => update({ activeAgentId: id === "none" ? "" : id })}
+            />
+          )}
           {(streamingId || wfRunning) ? (
             <>
               {/* 生成中仍可发送：Enter 或点此 = 打断并合并（生图/工作流流程会先确认） */}

@@ -50,17 +50,30 @@ def _build(chat_base: str, chat_key: str, chat_model: str,
            thread_id: str = "home", output_dir: str = "", repo_id: str = "home",
            embed_base: str = "", embed_key: str = "", embed_model: str = "embedding-3",
            insp_sink: list[dict] | None = None, proxy_url: str = "", style: str = "",
-           style_template: str = "", has_images: bool = False):
+           style_template: str = "", has_images: bool = False, agent_id: str = ""):
     """构建 agent。image_sink 收集本轮生成的图片地址，供路由透出。
     出图时后端同步落盘：下载留存→入库→追加进 chat_snapshot，前端断开也不丢。
     has_images=True（本轮用户带图）时裁剪工具集，物理上只保留 image_to_image，
-    从根上杜绝大脑绕道文生图/反推——比任何提示词约束都硬。"""
+    从根上杜绝大脑绕道文生图/反推——比任何提示词约束都硬。
+    agent_id 非空时按该 Agent 预设覆盖 system_prompt/工具/请求参数；空则用内置默认（原行为不变）。"""
     from langchain.chat_models import init_chat_model
+
+    # 读 Agent 预设（空 agent_id 或查不到 → agent=None，走内置默认，与加此功能前完全一致）
+    agent_cfg = None
+    try:
+        from app.services import agent_store
+        agent_cfg = agent_store.get_agent(agent_id)
+    except Exception:
+        agent_cfg = None
+
+    _temp = 0.5
+    if agent_cfg and isinstance(agent_cfg.get("temperature"), (int, float)):
+        _temp = agent_cfg["temperature"]
 
     url = _llm.normalize_base_url(chat_base)
     llm = init_chat_model(chat_model, model_provider="openai",
                           base_url=url, api_key=chat_key or "not-needed",
-                          temperature=0.5, timeout=120, max_retries=1)
+                          temperature=_temp, timeout=120, max_retries=1)
 
     @tool
     def analyze_image(state: Annotated[dict, InjectedState]) -> str:
@@ -158,19 +171,74 @@ def _build(chat_base: str, chat_key: str, chat_model: str,
     from app.services.chat_memory import get_saver
     # 按存档模板/用户选的风格/生图模型名拼接提示词写法指引
     # 仅当用户选了自定义风格存档时才附加风格指引；否则不注入任何风格约束，保持原样直出
-    system_prompt = _AGENT_SYSTEM_BASE
+    # system_prompt 起点：自定义 Agent 用其 systemPrompt（完全替换人设），否则用内置默认。
+    # memory 作为长期记忆拼在后面。agent_cfg 为 None（空 agent_id）时行为与原来完全一致。
+    if agent_cfg and (agent_cfg.get("systemPrompt") or "").strip():
+        system_prompt = agent_cfg["systemPrompt"].strip()
+    else:
+        system_prompt = _AGENT_SYSTEM_BASE
+    if agent_cfg and (agent_cfg.get("memory") or "").strip():
+        system_prompt += "\n\n【长期记忆（关于用户/偏好）】\n" + agent_cfg["memory"].strip()
+
+    # 工具开关：自定义 Agent 可关掉某些内置工具；无 agent_cfg 时全开（原行为）
+    tw = (agent_cfg or {}).get("tools") or {}
+    def _on(k: str) -> bool:
+        return tw.get(k, True) if agent_cfg else True
+
     if (style_template or "").strip():
         system_prompt += "\n\n【生图提示词写法】" + guidance_for("", gen_model, style_template)
     # 本轮带图 → 物理裁剪工具集：只留 image_to_image + 灵感搜索，拿掉文生图/反推，
     # 大脑没有绕道选项，参考图必然上传、prompt 必然原样进图生图接口。
     if has_images:
-        tools = [image_to_image, search_inspiration]
+        tools = []
+        if _on("image_to_image"):
+            tools.append(image_to_image)
+        if _on("search_inspiration"):
+            tools.append(search_inspiration)
         system_prompt += (
             "\n\n【当前对话用户已上传图片】只能用 image_to_image 出图（已自动收集全部上传图作参考）；"
             "prompt 直接用用户原话（中文就传中文，一字不改、不翻译、不拆成逗号标签），不反推、不改写。"
         )
     else:
-        tools = [generate_image, search_inspiration]
+        tools = []
+        if _on("generate_image"):
+            tools.append(generate_image)
+        if _on("search_inspiration"):
+            tools.append(search_inspiration)
+    # 合并 MCP 工具：有 Agent 时按其选中的 mcpServerIds 加载（空=不用）；无 Agent（内置默认）全量加载
+    try:
+        from app.services import mcp_client
+        if agent_cfg is not None:
+            mcp_tools = mcp_client.load_tools_for_servers(agent_cfg.get("mcpServerIds") or [])
+        else:
+            mcp_tools = mcp_client.load_mcp_tools()
+        if mcp_tools:
+            tools = [*tools, *mcp_tools]
+            names = "、".join(t.name for t in mcp_tools)
+            # 约束 MCP 工具调用边界：外部工具有副作用/耗时/耗额度，避免大脑滥用或答非所问
+            system_prompt += (
+                "\n\n【外部工具（MCP）调用边界】你额外接入了以下外部工具：" + names + "。"
+                "调用规则："
+                "①仅当用户的请求明确需要该工具能力时才调用（如查资料/读写文件/查数据库），"
+                "不要为了'展示能力'主动调用；能直接回答或用生图/反推工具完成的，优先用内置能力。"
+                "②生图/改图任务一律走 generate_image / image_to_image，绝不用外部工具替代。"
+                "③外部工具可能有副作用（写文件、发请求、消耗额度）或较慢，调用前想清楚必要性，一次任务不重复调同一工具刷结果。"
+                "④工具失败时如实告知用户失败原因，不要编造结果。"
+                "⑤调用参数严格按工具签名，不臆造未提供的字段。"
+            )
+    except Exception:
+        pass
+    # 拼入技能扩展：有 Agent 时按其选中的 skillIds（空=不用）；无 Agent（内置默认）用全部已启用技能
+    try:
+        from app.services import skills_store
+        if agent_cfg is not None:
+            frags = skills_store.fragments_by_ids(agent_cfg.get("skillIds") or [])
+        else:
+            frags = skills_store.enabled_prompt_fragments()
+        if frags:
+            system_prompt += "\n\n【用户自定义技能】\n" + "\n".join(f"- {f}" for f in frags)
+    except Exception:
+        pass
     return create_agent(
         model=llm,
         tools=tools,
@@ -185,7 +253,8 @@ def stream_agent(thread_id: str, message: str, images: list[str] | None,
                  size: str = "1024x1024", output_dir: str = "", repo_id: str = "home",
                  embed_base: str = "", embed_key: str = "",
                  embed_model: str = "embedding-3", cancel_event=None,
-                 proxy_url: str = "", style: str = "", style_template: str = "") -> Iterator[dict]:
+                 proxy_url: str = "", style: str = "", style_template: str = "",
+                 agent_id: str = "") -> Iterator[dict]:
     """运行智能体，逐步产出事件 dict：
     {"delta": "..."} 文本增量；{"image": "url"} 生成的图片；{"error": "..."}。
     历史按 thread_id 自动载入续写、落盘（复用 checkpointer）。
@@ -199,7 +268,7 @@ def stream_agent(thread_id: str, message: str, images: list[str] | None,
                    thread_id=thread_id, output_dir=output_dir, repo_id=repo_id or thread_id,
                    embed_base=embed_base, embed_key=embed_key, embed_model=embed_model,
                    insp_sink=insp, proxy_url=proxy_url, style=style, style_template=style_template,
-                   has_images=bool(images))
+                   has_images=bool(images), agent_id=agent_id)
     config = {"configurable": {"thread_id": thread_id}}
 
     if images:

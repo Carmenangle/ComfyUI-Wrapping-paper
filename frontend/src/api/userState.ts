@@ -25,3 +25,12 @@ export function renameRepoFolder(args: {
     "/user-state/rename-folder", args,
   );
 }
+
+// 上传对话背景图，返回后端保存的本地路径（填进 chatBgPath）
+export async function uploadChatBg(file: File): Promise<{ ok: boolean; path: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const resp = await fetch("http://127.0.0.1:8010/api/user-state/upload-bg", { method: "POST", body: fd });
+  if (!resp.ok) throw new Error(`上传失败: ${resp.status}`);
+  return resp.json();
+}

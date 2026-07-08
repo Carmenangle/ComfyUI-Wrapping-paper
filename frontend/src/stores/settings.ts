@@ -51,6 +51,14 @@ export interface Settings {
   civitaiToken: string; // Civitai API key（下载鉴权模型用）
   proxyUrl: string; // 联网搜索代理地址（灵感搜索走此代理访问外网）
   proxyEnabled: boolean; // 是否启用代理（关则直连外网）
+  smitheryKey?: string; // Smithery MCP 市场 API Key（浏览/连接托管 MCP 服务器用）
+  chatBgPath?: string; // 小仓库对话背景图（本地文件路径，走 local-view 读取）
+  chatBgOpacity?: number; // 对话背景透明度 0~1（默认 0.15）
+  chatBgFit?: "cover" | "contain"; // 填充方式：cover 铺满裁剪 / contain 完整显示
+  chatBgScale?: number; // 缩放 0.5~2（默认 1）
+  chatBgPosX?: number; // 水平位置 0~100（默认 50 居中）
+  chatBgPosY?: number; // 垂直位置 0~100（默认 50 居中）
+  activeAgentId?: string; // 当前对话选中的 Agent 预设 id（空=内置默认行为）
 }
 
 const KEY = "laf_settings";
@@ -71,6 +79,13 @@ const DEFAULT: Settings = {
   civitaiToken: "",
   proxyUrl: "http://127.0.0.1:7897",
   proxyEnabled: true,
+  smitheryKey: "",
+  chatBgPath: "",
+  chatBgOpacity: 0.15,
+  chatBgFit: "cover",
+  chatBgScale: 1,
+  chatBgPosX: 50,
+  chatBgPosY: 50,
 };
 
 // 旧数据迁移：单 chatModel 字段 → chatModels 列表（向后兼容）

@@ -3,7 +3,7 @@ import { Boxes, Bot, Download, Home, Images, Package, Settings, Sparkles, Workfl
 import { useRepos, type Repo } from "./stores/repos";
 import { useSettings, activeChatModel } from "./stores/settings";
 import { SupportWidget } from "./components/SupportWidget";
-import { SettingsModal } from "./components/SettingsModal";
+import { SettingsView } from "./views/settings/SettingsView";
 import { WorkflowTemplates } from "./pages/WorkflowTemplates";
 import { ModelDownload } from "./pages/ModelDownload";
 import { ConfirmModal, PromptModal } from "./components/Modal";
@@ -73,7 +73,6 @@ export function App() {
   const [deleting, setDeleting] = useState<Repo | null>(null);
   const [delBlocked, setDelBlocked] = useState<string | null>(null); // 删仓库被资产拦截的提示
   const [nameErr, setNameErr] = useState<string | null>(null); // 仓库重名提示
-  const [showSettings, setShowSettings] = useState(false);
   // 资产库「发送至对话」：先弹框选目标仓库，再跳该仓库 chat 并把图带进输入框
   const [sendImgUrl, setSendImgUrl] = useState<string | null>(null);   // 待发送的图（选仓库中）
   const [sendParent, setSendParent] = useState<string | null>(null);   // 两级选择：已选的顶层仓库
@@ -108,7 +107,7 @@ export function App() {
           </div>
         ))}
         <div className="spacer" />
-        <button className="nav-item" onClick={() => setShowSettings(true)}>
+        <button className="nav-item" onClick={() => setView("settings")}>
           <Settings size={18} /> 设置
         </button>
       </aside>
@@ -119,6 +118,7 @@ export function App() {
         {view === "ai-build" && <AIBuildView onInstallNode={(q) => { setMarketSearch(q); setView("node-manager"); }} />}
         {view === "node-index" && <NodeIndexView />}
         {view === "node-manager" && <NodeManagerView initialSearch={marketSearch} onSearchConsumed={() => setMarketSearch("")} />}
+        {view === "settings" && <SettingsView settings={settings} update={settingsStore.update} />}
         {view === "repos" && (
           <ReposView
             repos={childrenOf(undefined)}
@@ -248,14 +248,6 @@ export function App() {
           confirmText="知道了"
           onConfirm={() => setNameErr(null)}
           onCancel={() => setNameErr(null)}
-        />
-      )}
-
-      {showSettings && (
-        <SettingsModal
-          settings={settingsStore.settings}
-          update={settingsStore.update}
-          onClose={() => setShowSettings(false)}
         />
       )}
 

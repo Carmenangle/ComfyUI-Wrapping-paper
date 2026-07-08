@@ -5,10 +5,11 @@ export type View =
   | "home" | "repos" | "repo-detail" | "chat"     // 创作/资产
   | "assets"                                        // 资产库(全站聚合)
   | "workflows" | "ai-build" | "node-index"         // 工作流区
-  | "models" | "node-manager";                      // 系统区（settings 走弹窗，不占 view）
+  | "models" | "node-manager"                       // 系统区
+  | "settings";                                     // 设置中心（整页路由）
 
 // 单段 hash 的 view 集合（无 repoId 参数），parse/build 共用避免重复。
-const SIMPLE_VIEWS: View[] = ["repos", "assets", "workflows", "ai-build", "node-index", "models", "node-manager"];
+const SIMPLE_VIEWS: View[] = ["repos", "assets", "workflows", "ai-build", "node-index", "models", "node-manager", "settings"];
 
 // URL hash <-> 视图状态：刷新后停留在当前页面
 export function parseHash(): { view: View; repoId: string | null } {

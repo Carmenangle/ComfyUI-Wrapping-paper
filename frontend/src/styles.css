@@ -1388,6 +1388,110 @@ body {
   overflow: hidden;
 }
 
+/* ===== 设置中心：整页左右布局 ===== */
+.settings-page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.settings-nav {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 24px 14px;
+  overflow-y: auto;
+}
+
+.settings-nav-group { margin-bottom: 22px; }
+
+.settings-nav-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 12px 8px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 9px;
+  font-size: 15px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-nav-item:hover { background: var(--surface-2, rgba(128,128,128,0.1)); }
+.settings-nav-item.active { background: var(--accent); color: #fff; }
+
+.settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-content-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 40px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 设置整页的表单控件（不在 .modal 内，需单独给样式，否则输入框会用浏览器默认窄宽） */
+.settings-content-body input,
+.settings-content-body select,
+.settings-content-body textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+/* 复选框恢复原生尺寸，不被上面撑满 */
+.settings-content-body input[type="checkbox"] {
+  width: auto;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.settings-content-body input:focus,
+.settings-content-body select:focus,
+.settings-content-body textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 26px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.settings-dirty { color: var(--text-muted); font-size: 13px; }
+.settings-saved { color: #2e9e5b; font-size: 12px; }
+.field-hint { color: var(--text-muted); font-size: 12px; margin: 4px 0 0; }
+
+
 .settings-head {
   display: flex;
   justify-content: space-between;
@@ -1414,14 +1518,14 @@ body {
 
 /* settings */
 .field {
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 
 .field label {
   display: block;
   font-weight: 600;
-  font-size: 13px;
-  margin-bottom: 6px;
+  font-size: 14px;
+  margin-bottom: 7px;
 }
 
 .field input,
@@ -1431,13 +1535,19 @@ body {
 
 .settings-section {
   border-top: 1px solid var(--border);
-  padding-top: 16px;
-  margin-top: 4px;
+  padding-top: 22px;
+  margin-top: 22px;
+}
+.settings-section:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
 }
 
 .settings-section h4 {
-  margin: 0 0 12px;
-  font-size: 15px;
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .image-model-card {
@@ -1506,7 +1616,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  position: relative;
 }
+
+/* 对话背景层：sticky 固定在对话流顶部铺满可视区，不占布局、不挡交互，内容在其上 */
+.chat-bg {
+  position: sticky;
+  top: 0;
+  left: 0;
+  height: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.chat-bg::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 85vh;
+  background-image: inherit;
+  background-size: inherit;
+  background-position: inherit;
+  background-repeat: inherit;
+}
+.chat-stream > *:not(.chat-bg) { position: relative; z-index: 1; }
 
 /* 用户消息：右对齐深色气泡 */
 .msg-user {
@@ -2327,6 +2462,127 @@ body {
   padding: 1px 6px;
   border-radius: 5px;
   font-size: 0.9em;
+}
+
+/* ===== Smithery 市场浏览弹窗（左筛选 + 右卡片列表，对标官网） ===== */
+.smithery-modal {
+  width: 92%;
+  max-width: 960px;
+  height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.smithery-body { flex: 1; display: flex; overflow: hidden; }
+
+.smithery-filters {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 16px 10px;
+  overflow-y: auto;
+}
+
+.smithery-filter-group { margin-bottom: 18px; }
+
+.smithery-filter-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 0 10px 8px;
+}
+
+.smithery-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.smithery-filter-item:hover { background: var(--surface-2, rgba(128,128,128,0.1)); }
+.smithery-filter-item.active { background: var(--accent); color: #fff; }
+.smithery-filter-item.active svg { color: #fff; }
+
+.smithery-results {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+.smithery-count { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+
+.smithery-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smithery-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.smithery-card:hover { border-color: var(--accent); }
+
+.smithery-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.smithery-icon-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2, rgba(128,128,128,0.15));
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.smithery-card-main { flex: 1; min-width: 0; }
+
+.smithery-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.smithery-card-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 4px;
+}
+
+.smithery-card-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 

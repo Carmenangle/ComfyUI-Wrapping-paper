@@ -204,7 +204,7 @@ export function imageAgentStream(
   onDelta: (text: string) => void,
   onImage: (url: string, id?: string) => void,
   onDone: (err?: string) => void,
-  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; messageId?: string; proxyUrl?: string; style?: string; styleTemplate?: string },
+  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; messageId?: string; proxyUrl?: string; style?: string; styleTemplate?: string; agentId?: string },
   onInspiration?: (card: Inspiration & { id?: string }) => void,
 ): () => void {
   return openSSE("/ai/image-agent", {
@@ -223,6 +223,7 @@ export function imageAgentStream(
     proxy_url: persist?.proxyUrl || "",
     style: persist?.style || "",
     style_template: persist?.styleTemplate || "",
+    agent_id: persist?.agentId || "",
   }, (obj) => {
     if (obj.delta) onDelta(String(obj.delta));
     if (obj.image) onImage(String(obj.image), obj.image_id as string | undefined);

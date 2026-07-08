@@ -8,7 +8,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel
 
 from app.config import DATA_DIR
@@ -82,3 +82,19 @@ def sync_markers(req: SyncMarkersRequest) -> dict[str, int]:
             repo_meta.write_repo_marker(d, d.name)
             n += 1
     return {"written": n}
+
+
+@router.post("/upload-bg")
+async def upload_bg(file: UploadFile = File(...)) -> dict:
+    """上传对话背景图，存到 data/backgrounds/，返回本地绝对路径（前端填进 chatBgPath，走 local-view 读）。"""
+    from uuid import uuid4
+    bg_dir = DATA_DIR / "backgrounds"
+    bg_dir.mkdir(parents=True, exist_ok=True)
+    name = file.filename or "bg.png"
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "png"
+    if ext not in ("png", "jpg", "jpeg", "webp", "gif", "bmp"):
+        ext = "png"
+    dest = bg_dir / f"{uuid4().hex}.{ext}"
+    data = await file.read()
+    dest.write_bytes(data)
+    return {"ok": True, "path": str(dest)}

@@ -612,7 +612,7 @@ export function useChatSession(deps: ChatSessionDeps) {
           );
         }
       },
-      { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, messageId: botId, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", style: "", styleTemplate: activeStyleTemplate(settings) },
+      { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, messageId: botId, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", style: "", styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "" },
       onInspiration,
     );
   };

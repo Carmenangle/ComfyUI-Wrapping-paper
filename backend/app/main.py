@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import ai, ai_providers, assets, characters, comfyui, loras, models, node_manager, rag, runs, user_state, workflows
+from app.routers import ai, ai_providers, agents, assets, characters, comfyui, loras, mcp, models, node_manager, rag, runs, skills, user_state, workflows
 
 app = FastAPI(title="Local AI ComfyUI Frontend API")
 init_db()
@@ -27,6 +27,9 @@ app.include_router(comfyui.router, prefix="/api/comfyui", tags=["comfyui"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(node_manager.router, prefix="/api/node-manager", tags=["node-manager"])
 app.include_router(user_state.router, prefix="/api/user-state", tags=["user-state"])
+app.include_router(mcp.router, prefix="/api/mcp", tags=["mcp"])
+app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
+app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 
 
 @app.get("/api/health")
