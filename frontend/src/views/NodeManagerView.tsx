@@ -27,6 +27,7 @@ export function NodeManagerView({ initialSearch = "", onSearchConsumed }: {
   const [running, setRunning] = useState<boolean | null>(null);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState<null | "stop" | "restart">(null);
+  const [restartedAt, setRestartedAt] = useState(0);  // ComfyUI 重启完成时间戳，通知 InstalledTab 重新检查更新（治更新+重启后状态不实时）
 
   const checkStatus = () => {
     comfyStatus(url).then((s) => setRunning(s.running)).catch(() => setRunning(false));
@@ -40,7 +41,7 @@ export function NodeManagerView({ initialSearch = "", onSearchConsumed }: {
       await new Promise((r) => setTimeout(r, 2500));
       let up = false;
       try { up = (await comfyStatus(url)).running; } catch { up = false; }
-      if (up) { setRunning(true); setBusy(`${label}完成，ComfyUI 已在运行。`); return; }
+      if (up) { setRunning(true); setBusy(`${label}完成，ComfyUI 已在运行。`); setRestartedAt(Date.now()); return; }
       const sec = Math.round((Date.now() - t0) / 1000);
       setBusy(`${label}中，ComfyUI 正在初始化（首次较慢，已 ${sec}s）…`);
     }
@@ -114,7 +115,7 @@ export function NodeManagerView({ initialSearch = "", onSearchConsumed }: {
       ) : (
         <>
           {tab === "comfy" && <ComfyUpdateTab url={url} />}
-          {tab === "installed" && <InstalledTab url={url} />}
+          {tab === "installed" && <InstalledTab url={url} restartedAt={restartedAt} />}
           {tab === "market" && <MarketTab url={url} initialSearch={initialSearch} onSearchConsumed={onSearchConsumed} />}
           {tab === "scan" && <WorkflowScanTab url={url} />}
         </>

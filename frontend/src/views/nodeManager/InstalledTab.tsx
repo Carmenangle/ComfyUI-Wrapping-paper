@@ -20,7 +20,7 @@ let lastCheck: { updatable: Record<string, boolean>; failedIds: string[]; restar
 
 // 插件节点更新：已装插件表 + 检查更新 + 单个更新/卸载。
 // 版本/日期列对齐图1启动器：nightly（git-HEAD 装的）显示短哈希+真实提交日期，非Git仓库明确标注。
-export function InstalledTab({ url }: { url: string }) {
+export function InstalledTab({ url, restartedAt = 0 }: { url: string; restartedAt?: number }) {
   const { settings } = useSettings();
   const path = settings.comfyuiPath;
   const [items, setItems] = useState<NodePack[]>([]);
@@ -53,6 +53,15 @@ export function InstalledTab({ url }: { url: string }) {
         if (!autoCheckedThisSession && !lastCheck) { autoCheckedThisSession = true; checkUpdates(); }
       });
   }, [url, path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ComfyUI 重启完成后：清「更新重启」态 + 重新做真实 git 检查（此刻新代码已加载，比对结果才准确）。
+  // 治「更新+重启后状态不实时、仍用早期检查记录」——restartedAt 变化即触发。
+  useEffect(() => {
+    if (!restartedAt) return;  // 初始 0 不触发
+    setPendingRestart(new Set());
+    if (lastCheck) lastCheck.restartIds = [];
+    checkUpdates();
+  }, [restartedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 用上次检查缓存覆盖列表的 updatable，并恢复 failed/restart 标记（重挂载后保持结果）
   const applyLastCheck = (list: NodePack[]) => {
