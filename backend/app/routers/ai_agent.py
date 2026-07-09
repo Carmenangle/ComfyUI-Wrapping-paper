@@ -55,6 +55,31 @@ def image_agent(req: ImageAgentRequest) -> StreamingResponse:
     return sse_response(lambda: agent_runner.drain(q))
 
 
+class MultiAgentRequest(ImageAgentRequest):
+    route_model: str = ""   # supervisor 判分派用的（快）模型，空则用主对话模型
+
+
+@router.post("/multi-agent")
+def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
+    """Supervisor 多 Agent（LangGraph）：主管判意图→分派生图/图生图/反推/灵感专家。SSE 流式，
+    透出节点流转({trace})供前端展示协作过程。与单 agent(image-agent)并存，用户可切换。"""
+    from app.services import agent_graph
+
+    if not req.message.strip() and not req.images:
+        raise HTTPException(status_code=400, detail="内容为空")
+
+    def gen():
+        yield from agent_graph.stream_multi_agent(
+            req.thread_id, req.message, req.images or None,
+            req.base_url, req.api_key, req.model,
+            req.gen_base_url, req.gen_api_key, req.gen_model,
+            req.size, req.output_dir, req.repo_id or req.thread_id,
+            req.embed_base_url, req.embed_api_key, req.embed_model,
+            req.proxy_url, req.route_model,
+        )
+    return sse_response(gen)
+
+
 @router.get("/image-agent/running")
 def image_agent_running(thread_id: str = "home") -> dict[str, object]:
     """该 thread 是否有后台生成任务在跑。前端切回/刷新时据此轮询快照等落盘。"""

@@ -99,6 +99,8 @@ export function ChatView({
   // 知识库：手动参考资料入库弹窗
   const [showKnowledge, setShowKnowledge] = useState(false);
   const [indexingDoc, setIndexingDoc] = useState(false);
+  // 多 Agent 模式（Supervisor/LangGraph）：开启时自由文本走 /multi-agent，复用同一生命周期。声明在 useChatSession 前（要传入）。
+  const [multiMode, setMultiMode] = useState(false);
 
   // 聊天会话引擎：messages/生成生命周期/持久化/编排全部集中在 useChatSession（见 lib/useChatSession）。
   const {
@@ -110,8 +112,11 @@ export function ChatView({
     confirmReq, compact, compacting,
   } = useChatSession({
     repo, settings, setCover, chat, genModel,
-    size: calcSize(aspect, resTier), templates, setShowPicker, atBottomRef,
+    size: calcSize(aspect, resTier), templates, setShowPicker, atBottomRef, multiMode,
   });
+
+  // 多 Agent 模式（Supervisor/LangGraph）：与单 agent 并存，开关切换。开启时自由文本走 /multi-agent 端点，
+  // 复用 useChatSession 的完整生命周期（消息右侧展示/图片渲染/后台化/退出继续/落盘），仅后端端点不同。
 
   const submitDocument = (title: string, text: string) => {
     setIndexingDoc(true);
@@ -378,6 +383,14 @@ export function ChatView({
               onPick={(id) => update({ activeAgentId: id === "none" ? "" : id })}
             />
           )}
+          <button
+            className={multiMode ? "btn primary" : "btn"}
+            title="多 Agent 模式（Supervisor 编排：主管分派→生图/反推/灵感专家）。开启后可看到智能体协作过程。"
+            onClick={() => setMultiMode((v) => !v)}
+          >
+            <Boxes size={16} style={{ marginRight: 6, verticalAlign: "-2px" }} />
+            多Agent{multiMode ? "·开" : ""}
+          </button>
           {(streamingId || wfRunning) ? (
             <>
               {/* 生成中仍可发送：Enter 或点此 = 打断并合并（生图/工作流流程会先确认） */}

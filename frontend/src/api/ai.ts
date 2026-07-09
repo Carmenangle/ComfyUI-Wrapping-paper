@@ -237,6 +237,45 @@ export function fetchHistory(threadId: string) {  return apiGet<{ items: ChatTur
   );
 }
 
+// Supervisor 多 Agent：走 LangGraph 编排端点。onTrace 透出节点流转（主管分派→专家执行）供展示协作过程。
+export function multiAgent(
+  threadId: string,
+  message: string,
+  images: string[],
+  chat: { baseUrl: string; apiKey: string; modelName: string },
+  gen: { baseUrl: string; apiKey: string; modelName: string },
+  size: string,
+  cbs: {
+    onTrace: (line: string) => void;
+    onDelta: (text: string) => void;
+    onImage: (url: string, id?: string) => void;
+    onInspiration?: (card: Inspiration & { id?: string }) => void;
+    onDone: (err?: string) => void;
+  },
+  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; proxyUrl?: string; routeModel?: string },
+): () => void {
+  return openSSE("/ai/multi-agent", {
+    thread_id: threadId,
+    message,
+    images,
+    ...chatBody(chat),
+    gen_base_url: gen.baseUrl,
+    gen_api_key: gen.apiKey,
+    gen_model: gen.modelName,
+    size,
+    output_dir: persist?.outputDir || "",
+    repo_id: persist?.repoId || "",
+    ...sseEmbed(persist?.embed),
+    proxy_url: persist?.proxyUrl || "",
+    route_model: persist?.routeModel || "",
+  }, (obj) => {
+    if (obj.trace) cbs.onTrace(String(obj.trace));
+    if (obj.delta) cbs.onDelta(String(obj.delta));
+    if (obj.image) cbs.onImage(String(obj.image), obj.id as string | undefined);
+    if (obj.insp) cbs.onInspiration?.(obj.insp as Inspiration & { id?: string });
+  }, cbs.onDone);
+}
+
 // 清空某仓库对话线
 export function clearHistory(threadId: string) {
   return apiPost<{ ok: boolean }>("/ai/chat/clear", { thread_id: threadId });

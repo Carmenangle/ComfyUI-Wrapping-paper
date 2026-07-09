@@ -14,7 +14,7 @@ import {
   saveLocal, saveLocalSrc, localViewUrl, interruptComfy, type GenResult,
 } from "../api/comfyui";
 import {
-  imageAgentStream, fetchHistory, indexGeneration, appendMessage,
+  imageAgentStream, fetchHistory, indexGeneration, appendMessage, multiAgent,
   saveSnapshot, fetchSnapshot, fetchAgentRunning, cancelAgent,
   fetchInspiration, extractKeywords, compactHistory,
 } from "../api/ai";
@@ -37,6 +37,7 @@ export interface ChatSessionDeps {
   templates: Template[];
   setShowPicker: (v: boolean) => void;           // 与 /w 选择浮层共享
   atBottomRef: MutableRefObject<boolean>;        // 与滚动跟随 UI 共享
+  multiMode?: boolean;                           // 多 Agent 模式：自由文本走 Supervisor 编排端点（复用同一生命周期）
 }
 
 // PLACEHOLDER_BODY
@@ -71,6 +72,9 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   const pushBot = (text: string) =>
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text }]);
+  // 通用：追加一条任意消息（多 Agent 模式用，可带 user 角色 / 图片）
+  const pushMsg = (msg: Partial<ChatMessage>) =>
+    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: "", ...msg } as ChatMessage]);
 
   // 压缩上下文：AI 把历史+生成记录总结成一条摘要，清空对话线，只留摘要。知识库/资产不动。
   // 生成进行中不允许压缩（避免与流式落盘打架）。返回是否成功。
@@ -527,8 +531,8 @@ export function useChatSession(deps: ChatSessionDeps) {
       planWorkflowOps(orchCard.card, text, content, false);  // force=false：带意图判定
       return;
     }
-    // 其余一律交给图像智能体
-    runFreeText(text, content);
+    // 其余一律交给图像智能体（多 Agent 模式走 Supervisor 编排，复用同一生命周期）
+    runFreeText(text, content, deps.multiMode === true);
   };
 
   // 把消息加入队列
@@ -568,7 +572,9 @@ export function useChatSession(deps: ChatSessionDeps) {
   // APPEND5_HERE
 
   // 自由文本 → 图像智能体（多轮上下文）：对话模型自主调反推/生图工具。
-  const runFreeText = (t: string, content?: RichContent) => {
+  // multi=true 走 Supervisor 多 Agent 端点（LangGraph 编排），复用同一套生命周期（消息/图片/状态/落盘），
+  // 仅后端端点不同 + 多 onTrace 协作过程。这是"前端生命周期与后端 agent 解耦"的体现。
+  const runFreeText = (t: string, content?: RichContent, multi = false) => {
     const images = content?.images || [];
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -599,19 +605,31 @@ export function useChatSession(deps: ChatSessionDeps) {
         inspiration: { query: card.query, prompt: card.prompt, tags: card.tags || [], sources: card.sources || [] },
       }]);
     };
+    const onDone = (err?: string) => {
+      dispatch({ t: "agentDone" });
+      abortRef.current = null;
+      if (err) {
+        setMessages((ms) =>
+          ms.map((m) => (m.id === botId ? { ...m, text: m.text || `对话失败：${err}` } : m)),
+        );
+      }
+    };
+    if (multi) {
+      // 多 Agent：trace（主管分派→专家执行）作为过程行 append 进 bot 文本，其余回调复用
+      abortRef.current = multiAgent(
+        threadId, t, images, chat, genModel, size,
+        {
+          onTrace: (line) => append(`${line}\n`),
+          onDelta: append,
+          onImage, onInspiration, onDone,
+        },
+        { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "" },
+      );
+      return;
+    }
     abortRef.current = imageAgentStream(
       threadId, t, images, chat, genModel, size, append, onImage,
-      (err) => {
-        dispatch({ t: "agentDone" });
-        abortRef.current = null;
-        if (err) {
-          setMessages((ms) =>
-            ms.map((m) =>
-              m.id === botId ? { ...m, text: m.text || `对话失败：${err}` } : m,
-            ),
-          );
-        }
-      },
+      onDone,
       { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, messageId: botId, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", style: "", styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "" },
       onInspiration,
     );
@@ -700,7 +718,7 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   return {
     messages, streamingId, wfRunning, queued,
-    send, runCommand, pushBot,
+    send, runCommand, pushBot, pushMsg,
     pickTemplate, markCardDone, markCardReopen,
     applyWorkflowOps, ignoreWorkflowOps,
     stopGenerating, guideQueued, cancelQueued,
