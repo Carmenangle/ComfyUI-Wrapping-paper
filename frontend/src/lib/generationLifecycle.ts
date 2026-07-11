@@ -30,8 +30,8 @@ export const initialGenState: GenState = { status: { kind: "idle" }, queue: [] }
 
 export type GenAction =
   | { t: "agentStart"; botId: string }        // 智能体一轮开始（进入 agent 态，未出图）
-  | { t: "agentImage" }                        // 本轮已触发生图（agent 态 → imageStarted=true）
-  | { t: "agentDone" }                         // 智能体流结束（回 idle）
+  | { t: "agentImage"; botId: string }         // 本轮已触发生图（仅当前 botId 可更新）
+  | { t: "agentDone"; botId: string }          // 智能体流结束（仅当前 botId 可结束）
   | { t: "workflowStart"; promptId: string }   // /s 工作流提交（进入 workflow 态）
   | { t: "workflowDone"; promptId: string }    // 工作流完成/超时（仅当 promptId 匹配才回 idle）
   | { t: "stop" }                              // 强制停止当前生成（回 idle，队列不动）
@@ -45,11 +45,13 @@ export function reduce(s: GenState, a: GenAction): GenState {
     case "agentStart":
       return { ...s, status: { kind: "agent", botId: a.botId, imageStarted: false } };
     case "agentImage":
-      return s.status.kind === "agent"
+      return s.status.kind === "agent" && s.status.botId === a.botId
         ? { ...s, status: { ...s.status, imageStarted: true } }
         : s;
     case "agentDone":
-      return s.status.kind === "agent" ? { ...s, status: { kind: "idle" } } : s;
+      return s.status.kind === "agent" && s.status.botId === a.botId
+        ? { ...s, status: { kind: "idle" } }
+        : s;
     case "workflowStart":
       return { ...s, status: { kind: "workflow", promptId: a.promptId } };
     case "workflowDone":

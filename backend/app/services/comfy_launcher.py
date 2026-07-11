@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.config import COMFY_EXT_DIR, DATA_DIR
+from app.config import COMFY_EXT_DIR, COMFYUI_BASE_URL, DATA_DIR
 from app.services import comfyui_client
 
 # 本进程拉起的 ComfyUI 子进程（None = 未由本工具启动）
@@ -28,10 +28,10 @@ def load_config() -> dict:
     if p.is_file():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            return {"path": data.get("path", ""), "url": data.get("url", "http://127.0.0.1:8188")}
+            return {"path": data.get("path", ""), "url": data.get("url", COMFYUI_BASE_URL)}
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
             pass
-    return {"path": "", "url": "http://127.0.0.1:8188"}
+    return {"path": "", "url": COMFYUI_BASE_URL}
 
 
 def save_config(path: str, url: str) -> dict:
@@ -124,7 +124,7 @@ def _kill_by_port(port: int = 8188) -> int:
     return killed
 
 
-def stop(url: str = "http://127.0.0.1:8188") -> dict:
+def stop(url: str = COMFYUI_BASE_URL) -> dict:
     """关闭 ComfyUI。本工具拉起的先 terminate 子进程树；否则按端口杀。"""
     global _proc
     port = urlparse(url).port or 8188

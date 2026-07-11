@@ -10,22 +10,32 @@ import { activeStyleTemplate } from "../stores/settings";
 import type { RichContent } from "../components/RichInput";
 import type { Template } from "../api/workflows";
 import {
-  comfyStatus, startComfy, submitGraph, getResult, viewUrl,
-  saveLocal, saveLocalSrc, localViewUrl, interruptComfy, type GenResult,
+  comfyStatus, startComfy, submitGraph, getResult, interruptComfy,
+  saveLocalSrc, localViewUrl, finalizeGeneration as persistWorkflowGeneration,
+  type GenResult,
 } from "../api/comfyui";
 import {
-  imageAgentStream, fetchHistory, indexGeneration, appendMessage, multiAgent,
+  fetchHistory, multiAgent,
   saveSnapshot, fetchSnapshot, fetchAgentRunning, cancelAgent,
-  fetchInspiration, extractKeywords, compactHistory,
+  fetchInspiration, compactHistory, clearCache,
 } from "../api/ai";
 import {
   reduce as reduceGen, initialGenState,
   streamingBotId, needsConfirm, runningPromptId, queuedItem,
 } from "./generationLifecycle";
 import { useWorkflowOrchestration } from "./workflowOrchestration";
-import { needsImageInput, hasImageProvided, pickBestText, slimSnapshot as slimSnapshotPure } from "./chatGeneration";
+import {
+  needsImageInput, hasImageProvided, pickBestText, shouldFinalize,
+  registerPending, unregisterPending, pendingResumeAction, pollSchedule,
+  slimSnapshot as slimSnapshotPure,
+} from "./chatGeneration";
+import { agentImageMessage, inspirationMessage, upsertMessages, workflowMessages } from "./chatSessionEvents";
 
 type Model = { baseUrl: string; apiKey: string; modelName: string };
+
+// 首页(home)=临时草稿区：草稿存模块级内存变量，随浏览器进程存活——
+// 页面刷新(进程重开)即重置为空，但应用运行期间切走首页再回来仍保留。不落 localStorage / 后端快照。
+let homeDraft: ChatMessage[] = [];
 
 export interface ChatSessionDeps {
   repo?: Repo;
@@ -37,7 +47,6 @@ export interface ChatSessionDeps {
   templates: Template[];
   setShowPicker: (v: boolean) => void;           // 与 /w 选择浮层共享
   atBottomRef: MutableRefObject<boolean>;        // 与滚动跟随 UI 共享
-  multiMode?: boolean;                           // 多 Agent 模式：自由文本走 Supervisor 编排端点（复用同一生命周期）
 }
 
 // PLACEHOLDER_BODY
@@ -61,7 +70,7 @@ export function useChatSession(deps: ChatSessionDeps) {
   const streamingId = streamingBotId(gen);             // 正在流式的 bot 气泡 id（渲染转圈用）
   const wfRunning = gen.status.kind === "workflow";    // /s 工作流进行中
   const queued = gen.queue;                            // 排队列表（渲染队列条用）
-  const abortRef = useRef<(() => void) | null>(null);      // 中断当前流式生成
+  const abortRef = useRef<{ botId: string; abort: () => void } | null>(null);  // 中断当前流式生成及其所有者
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);  // 切回后等后台落盘的轮询
   const bgRunningRef = useRef(false);  // 后台任务进行中：此时后端拥有快照写权，前端不抢写以免覆盖
   // 对话线 id = 仓库 id（首页用 "home"）：后端按此落盘多轮记忆与 RAG 知识库
@@ -103,12 +112,34 @@ export function useChatSession(deps: ChatSessionDeps) {
     }
   };
 
+  // 清除缓存：清空对话内容 + 删本仓库 reference/ 上传参考图。资产库(生成图)与知识库(RAG)不动。带确认弹窗。
+  const clearCacheAction = async (): Promise<boolean> => {
+    if (streamingId || wfRunning || compacting) return false;
+    const ok = await askConfirm(
+      "清除缓存会清空当前对话内容，并删除本仓库上传的参考图（reference 文件夹）。\n" +
+      "已生成的图片（资产库）和知识库内容都会保留，不受影响。确定清除吗？",
+    );
+    if (!ok) return false;
+    try {
+      await clearCache(threadId, settings.outputDir);
+      setMessages([]);
+      try { localStorage.removeItem(chatKey); } catch { /* 忽略 */ }
+      return true;
+    } catch (e) {
+      pushBot("清除缓存失败：" + (e as Error).message);
+      return false;
+    }
+  };
+
   // 进入仓库/切换时加载消息，三级兜底：本地 localStorage → 后端消息流快照 → langgraph 对话历史。
   useEffect(() => {
     let alive = true;
     loadedRef.current = false;
     let shownLocal = false;
-    const local = localStorage.getItem(chatKey);
+    // 首页(home)=临时草稿区：从模块级 homeDraft 恢复（进程内切走切回保留，页面刷新即空）。
+    // 不读 localStorage / 后端快照 / 后端历史。仅保留后台轮询——生成中切回来仍要看到进度。
+    const isHome = threadId === "home";
+    const local = isHome ? null : localStorage.getItem(chatKey);
     if (local) {
       try {
         const arr = JSON.parse(local) as ChatMessage[];
@@ -145,6 +176,13 @@ export function useChatSession(deps: ChatSessionDeps) {
       } catch { /* 状态接口失败，忽略 */ }
     };
     (async () => {
+      // 首页临时草稿区：从 homeDraft 恢复（进程内切回保留，刷新即空），仅接后台轮询（生成中切回可见进度）。
+      if (isHome) {
+        if (homeDraft.length > 0) setMessages(homeDraft);
+        loadedRef.current = true;
+        await maybeStartBgPoll();
+        return;
+      }
       try {
         const snap = await fetchSnapshot(threadId);
         if (!alive) return;
@@ -179,7 +217,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     })();
     return () => {
       alive = false;
-      abortRef.current?.();
+      abortRef.current?.abort();
       abortRef.current = null;
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       bgRunningRef.current = false;
@@ -189,10 +227,11 @@ export function useChatSession(deps: ChatSessionDeps) {
   // APPEND_HERE
 
   // 存快照前给图片瘦身：把用户上传的 data:URI 大图落盘转 local-view 小地址。
+  // data:URI 只来自用户上传的参考图 → 落 reference/ 子夹，与生成图（仓库根目录）分开。
   const persistDataUri = async (src: string): Promise<string> => {
     if (typeof src === "string" && src.startsWith("data:") && settings.outputDir && repo?.id) {
       try {
-        const s = await saveLocalSrc({ src, repoId: repo.id, outputDir: settings.outputDir });
+        const s = await saveLocalSrc({ src, repoId: repo.id, outputDir: settings.outputDir, subdir: "reference" });
         return localViewUrl(s.path);
       } catch { /* 保留原图 */ }
     }
@@ -201,8 +240,10 @@ export function useChatSession(deps: ChatSessionDeps) {
   const slimSnapshot = (msgs: ChatMessage[]) => slimSnapshotPure(msgs, persistDataUri);
 
   // 消息变化时持久化：本地即时写（快取）+ 后端快照防抖写（可靠真源）。
+  // 首页(home)=临时草稿区：只写模块级 homeDraft（进程内切走切回保留，刷新即空），不落 localStorage / 后端快照。
   useEffect(() => {
     if (!loadedRef.current) return;  // 加载完成前不写，防止空数组覆盖
+    if (threadId === "home") { homeDraft = messages; return; }  // 首页草稿区：仅存内存
     const slim = messages.map((m) =>
       m.workflow ? { ...m, workflow: { ...m.workflow, capturedGraph: null } } : m,
     );
@@ -230,6 +271,7 @@ export function useChatSession(deps: ChatSessionDeps) {
       workflow: {
         templateId: t.id,
         templateName: t.name,
+        draftGraph: null,
         capturedGraph: null,
         done: false,
       },
@@ -238,12 +280,19 @@ export function useChatSession(deps: ChatSessionDeps) {
     setShowPicker(false);
   };
 
-  // 「选择完毕」：存下从 iframe 抓取的工作流并标记完成
-  const markCardDone = (msgId: string, graph: unknown) =>
+  const updateCardDraft = (msgId: string, draftGraph: unknown) =>
+    setMessages((messages) => messages.map((message) =>
+      message.id === msgId && message.workflow
+        ? { ...message, workflow: { ...message.workflow, draftGraph } }
+        : message,
+    ));
+
+  // 「选择完毕」：原子存下最终 UI 草稿和原生 API prompt，并标记完成
+  const markCardDone = (msgId: string, draftGraph: unknown, capturedGraph: unknown) =>
     setMessages((ms) =>
       ms.map((m) =>
         m.id === msgId && m.workflow
-          ? { ...m, workflow: { ...m.workflow, capturedGraph: graph, done: true } }
+          ? { ...m, workflow: { ...m.workflow, draftGraph, capturedGraph, done: true } }
           : m,
       ),
     );
@@ -272,87 +321,49 @@ export function useChatSession(deps: ChatSessionDeps) {
     try { return JSON.parse(localStorage.getItem(pendingKey) || "[]"); } catch { return []; }
   };
   const addPending = (promptId: string) => {
-    const list = getPending().filter((p) => p.prompt_id !== promptId);
-    list.push({ prompt_id: promptId, createdAt: Date.now() });
+    const list = registerPending(getPending(), promptId, Date.now());
     try { localStorage.setItem(pendingKey, JSON.stringify(list)); } catch { /* ignore */ }
   };
   const removePending = (promptId: string) => {
     try {
-      localStorage.setItem(pendingKey, JSON.stringify(getPending().filter((p) => p.prompt_id !== promptId)));
+      localStorage.setItem(pendingKey, JSON.stringify(unregisterPending(getPending(), promptId)));
     } catch { /* ignore */ }
   };
 
   // 已 finalize 的 promptId，防同一次生成被 pollResult 与切回 resume 重复落盘=重复出图
   const finalizedRef = useRef<Set<string>>(new Set());
 
-  // 把一次已完成的生成结果落成消息 + 留存 + 入库 + 切词 + 落盘。返回是否产出了内容。
+  // 把一次已完成的生成结果交给后端统一留存，再投影为消息。返回是否产出了内容。
   const finalizeGeneration = async (r: GenResult, promptId?: string): Promise<boolean> => {
-    // 去重双闸：
-    // ① 持久化 pending——已被 removePending（这轮收尾过）的 promptId 不在 pending 里，直接跳过。
-    //    这是跨「进出仓库/重挂」的可靠去重（内存 finalizedRef 重挂即失效，是三张重复的根）。
-    // ② 内存 finalizedRef——防同一实例内 pollResult 与 resume 并发重入（removePending 前的窗口）。
-    if (promptId && !getPending().some((p) => p.prompt_id === promptId)) return false;
-    if (promptId && finalizedRef.current.has(promptId)) return false;
+    if (!shouldFinalize(promptId, getPending(), finalizedRef.current)) return false;
     const best = pickBestText(r.texts);
     if ((r.images?.length || 0) === 0 && !best) return false;
-    if (promptId) finalizedRef.current.add(promptId);
-    const imgs = await Promise.all(
-      (r.images || []).map(async (img) => {
-        if (settings.outputDir && repo?.id) {
-          try {
-            const s = await saveLocal({ img, repoId: repo.id, outputDir: settings.outputDir, url: settings.comfyuiUrl });
-            return localViewUrl(s.path);
-          } catch { /* 留存失败回退在线 */ }
-        }
-        return viewUrl(img, settings.comfyuiUrl);
-      }),
-    );
-    const blocks: ChatMessage[] = [];
-    if (imgs.length > 0) {
-      blocks.push({ id: crypto.randomUUID(), role: "assistant", text: best, image: imgs[0] });
-      for (const url of imgs.slice(1)) {
-        blocks.push({ id: crypto.randomUUID(), role: "assistant", text: "", image: url });
-      }
-    } else {
-      blocks.push({ id: crypto.randomUUID(), role: "assistant", text: best });
-    }
-    // 追加图后立即落盘 snapshot（不等 600ms 防抖）：退出仓库会整体卸载 ChatView，
-    // 防抖来不及跑就丢图 → 返回时 fetchSnapshot 读到旧快照(无图)，卡在"运转中"。
-    // 用函数式回调捕获追加后的完整数组，同步写快照，保证退出返回图仍在。
-    const tid = threadId;
-    setMessages((m) => {
-      const next = [...m, ...blocks];
-      slimSnapshot(next).then((full) => saveSnapshot(tid, full).catch(() => {})).catch(() => {});
-      return next;
-    });
-    if (imgs.length > 0 && repo?.id) setCover(repo.id, imgs[0]);
-    let autoTags = "";
-    if (best.trim()) {
-      try { autoTags = (await extractKeywords(best, chat)).tags.join(","); } catch { /* 兜底后端切 */ }
-    }
-    // 入库(Chroma 写入)完成后再派发刷新事件——否则资产库抢在写入前拉取，读不到新图。
-    const indexJobs: Promise<unknown>[] = [];
-    if (imgs.length > 0) {
-      // 每张都带上提示词+标签(同批同提示词)：原来只给第 0 张，一旦第 0 张入库失败整批提示词全丢。
-      // 每张各自带，Chroma 按 image_url 的确定性 doc_id 各存一条，无单点丢失。
-      imgs.forEach((url) => {
-        indexJobs.push(
-          indexGeneration(threadId, { prompt: best, tags: autoTags, image_url: url }, settings.embedModel)
-            .catch((e) => console.error("[资产库入库失败]", threadId, url, e)),
-        );
+    if (!promptId) return false;
+    finalizedRef.current.add(promptId);
+    try {
+      const result = await persistWorkflowGeneration({
+        threadId,
+        repoId: repo?.id || "home",
+        promptId,
+        prompt: best,
+        images: r.images || [],
+        outputDir: settings.outputDir,
+        comfyuiUrl: settings.comfyuiUrl,
+        embed: settings.embedModel,
+        chat,
       });
-    } else {
-      indexJobs.push(
-        indexGeneration(threadId, { prompt: best, tags: autoTags, image_url: "" }, settings.embedModel)
-          .catch((e) => console.error("[资产库入库失败]", threadId, e)),
-      );
+      const blocks = workflowMessages(result.messages);
+      setMessages((current) => upsertMessages(current, blocks));
+      const firstImage = blocks.find((message) => message.image)?.image;
+      if (firstImage && repo?.id) setCover(repo.id, firstImage);
+      if (result.durable && result.images.some((image) => image.indexed)) {
+        window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+      }
+      return blocks.length > 0;
+    } catch (error) {
+      finalizedRef.current.delete(promptId);
+      throw error;
     }
-    // 全部入库落定后才通知资产库刷新（不阻塞对话显示，异步等待）
-    Promise.all(indexJobs).then(() => {
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    });
-    appendMessage(threadId, "assistant", best, imgs).catch(() => {});
-    return true;
   };
 
   // 轮询某次生成的结果，拿到图片后插入对话流
@@ -380,13 +391,14 @@ export function useChatSession(deps: ChatSessionDeps) {
       // 前 150 次每 2 秒（快轮询 5 分钟），之后转慢守望每 15 秒，直到 ~20 分钟硬上限。
       // 全程不 removePending：即使用户不切仓库干等，超长任务(实测 71 节点 4.4 分钟，
       // 甚至更久)出图后也能被这条守望自动 finalize，不再丢图。
-      if (tries === 150) {
+      const schedule = pollSchedule(tries);
+      if (schedule.releaseBusy) {
         // 快轮询阶段结束仍没完成：解除"运转中"占用不阻塞操作，但继续后台慢守望。
         dispatch({ t: "workflowDone", promptId });
         pushBot("生成较复杂、仍在后台进行，出图后会自动载入（也可在 ComfyUI 面板看进度）。");
       }
-      if (tries < 210) {
-        setTimeout(tick, tries < 150 ? 2000 : 15000);
+      if (schedule.delayMs !== null) {
+        setTimeout(tick, schedule.delayMs);
       }
       // 达 210 次(约 20 分钟)仍未出：停止本轮守望，但保留 pending，
       // 下次进仓库/刷新由 resume 兜底重查。
@@ -446,9 +458,10 @@ export function useChatSession(deps: ChatSessionDeps) {
       if (!alive) return;
       const list = getPending();
       for (const p of list) {
-        if (resumedRef.current.has(p.prompt_id)) continue;  // 本会话已处理过，不重复
+        const action = pendingResumeAction(p, resumedRef.current, Date.now());
+        if (action === "skip") continue;  // 本会话已处理过，不重复
         resumedRef.current.add(p.prompt_id);
-        if (Date.now() - p.createdAt > 30 * 60 * 1000) { removePending(p.prompt_id); continue; }
+        if (action === "expire") { removePending(p.prompt_id); continue; }
         try {
           const r = await getResult(p.prompt_id, settings.comfyuiUrl);
           if (!alive) return;
@@ -531,8 +544,8 @@ export function useChatSession(deps: ChatSessionDeps) {
       planWorkflowOps(orchCard.card, text, content, false);  // force=false：带意图判定
       return;
     }
-    // 其余一律交给图像智能体（多 Agent 模式走 Supervisor 编排，复用同一生命周期）
-    runFreeText(text, content, deps.multiMode === true);
+    // 其余一律交给多 Agent（Supervisor 编排，复用同一生命周期）
+    runFreeText(text, content);
   };
 
   // 把消息加入队列
@@ -571,10 +584,9 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
   // APPEND5_HERE
 
-  // 自由文本 → 图像智能体（多轮上下文）：对话模型自主调反推/生图工具。
-  // multi=true 走 Supervisor 多 Agent 端点（LangGraph 编排），复用同一套生命周期（消息/图片/状态/落盘），
-  // 仅后端端点不同 + 多 onTrace 协作过程。这是"前端生命周期与后端 agent 解耦"的体现。
-  const runFreeText = (t: string, content?: RichContent, multi = false) => {
+  // 自由文本 → 多 Agent（Supervisor/LangGraph 编排，多轮上下文）：主管分派→生图/反推/灵感/工具专家。
+  // 复用同一套生命周期（消息/图片/状态/落盘），是"前端生命周期与后端 agent 解耦"的体现。
+  const runFreeText = (t: string, content?: RichContent) => {
     const images = content?.images || [];
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -594,45 +606,38 @@ export function useChatSession(deps: ChatSessionDeps) {
         ms.map((m) => (m.id === botId ? { ...m, text: m.text + delta } : m)),
       );
     const onImage = (shown: string, id?: string) => {
-      dispatch({ t: "agentImage" });  // 已触发生图 → 进入状态 B（打断需二次确认）
-      setMessages((m) => [...m, { id: id || crypto.randomUUID(), role: "assistant", text: "", image: shown }]);
-      if (repo?.id) setCover(repo.id, shown);
+      const ownsCurrentRun = abortRef.current?.botId === botId;
+      dispatch({ t: "agentImage", botId });
+      setMessages((messages) => upsertMessages(messages, [agentImageMessage(shown, id)]));
+      if (ownsCurrentRun && repo?.id) setCover(repo.id, shown);
       window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
     };
     const onInspiration = (card: { id?: string; query: string; prompt: string; tags: string[]; sources: { title: string; url: string }[] }) => {
-      setMessages((m) => [...m, {
-        id: card.id || crypto.randomUUID(), role: "assistant", text: "",
-        inspiration: { query: card.query, prompt: card.prompt, tags: card.tags || [], sources: card.sources || [] },
-      }]);
+      setMessages((messages) => upsertMessages(messages, [inspirationMessage(card)]));
     };
     const onDone = (err?: string) => {
-      dispatch({ t: "agentDone" });
-      abortRef.current = null;
+      dispatch({ t: "agentDone", botId });
+      if (abortRef.current?.botId === botId) abortRef.current = null;
       if (err) {
         setMessages((ms) =>
           ms.map((m) => (m.id === botId ? { ...m, text: m.text || `对话失败：${err}` } : m)),
         );
       }
     };
-    if (multi) {
-      // 多 Agent：trace（主管分派→专家执行）作为过程行 append 进 bot 文本，其余回调复用
-      abortRef.current = multiAgent(
-        threadId, t, images, chat, genModel, size,
-        {
-          onTrace: (line) => append(`${line}\n`),
-          onDelta: append,
-          onImage, onInspiration, onDone,
-        },
-        { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "" },
-      );
-      return;
-    }
-    abortRef.current = imageAgentStream(
-      threadId, t, images, chat, genModel, size, append, onImage,
-      onDone,
-      { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel, messageId: botId, proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", style: "", styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "" },
-      onInspiration,
+    // 多 Agent（Supervisor 编排）：trace（主管分派→专家执行）作为过程行 append 进 bot 文本，其余回调复用。
+    // 单 agent 对外入口已下线，其大脑降级为多 Agent 的 tool_agent 专家节点（承接 MCP/工具串联）。
+    const abort = multiAgent(
+      threadId, t, images, chat, genModel, size,
+      {
+        onTrace: (line) => append(`${line}\n`),
+        onDelta: append,
+        onImage, onInspiration, onDone,
+      },
+      { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel,
+        proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", messageId: botId,
+        styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "" },
     );
+    abortRef.current = { botId, abort };
   };
 
   // 工作流输入口编排（见 lib/workflowOrchestration）：依赖 runFreeText，故声明其后。
@@ -716,12 +721,19 @@ export function useChatSession(deps: ChatSessionDeps) {
     dispatchSend(item.content);  // 同 thread 新一轮：AI 带上下文续写 = 合并
   };
 
+  // 首页(home)临时草稿区手动清空：清当前显示 + 模块级 homeDraft。仅首页有意义（右上角按钮触发）。
+  const clearHome = () => {
+    homeDraft = [];
+    setMessages([]);
+  };
+
   return {
     messages, streamingId, wfRunning, queued,
     send, runCommand, pushBot, pushMsg,
-    pickTemplate, markCardDone, markCardReopen,
+    pickTemplate, updateCardDraft, markCardDone, markCardReopen,
     applyWorkflowOps, ignoreWorkflowOps,
     stopGenerating, guideQueued, cancelQueued,
     confirmReq, compact, compacting,
+    clearHome, clearCache: clearCacheAction,
   };
 }

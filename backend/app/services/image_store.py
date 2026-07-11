@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import os
 from datetime import datetime
 from pathlib import Path
 from urllib.request import urlopen
 from uuid import uuid4
 
+from app.config import COMFYUI_BASE_URL
 from app.services import comfyui_client
 from app.services.comfyui_client import ComfyError
 from app.services.pathnames import safe_seg
@@ -60,16 +63,31 @@ def save_local(
     filename: str = "",
     subfolder: str = "",
     type: str = "output",
-    url: str = "http://127.0.0.1:8188",
+    url: str = COMFYUI_BASE_URL,
+    subdir: str = "",
+    idempotency_key: str = "",
 ) -> str:
     """存原图到 outputDir/<repo_id>/，返回落盘路径。
 
     - src 非空：通用模式（data URI / 外部 URL）。
     - 否则用 filename 从 ComfyUI /view 取原图。
+    - subdir 非空：落到 <repo_id>/<subdir>/ 子文件夹（如用户上传的参考图 → reference/）。
     校验失败/取图失败抛 ComfyError，路由层转 HTTPException。
     """
     if not output_dir:
         raise ComfyError("未配置输出图片路径", 400)
+    from app.services import repo_meta
+    base = repo_meta.repo_folder(output_dir, repo_id)  # 文件夹名=仓库名(保中文)，并写 _repo.json
+    if subdir:
+        base = base / safe_seg(subdir)
+        base.mkdir(parents=True, exist_ok=True)
+    if idempotency_key and filename and not src:
+        fn = Path(filename).name
+        ext = fn.rsplit(".", 1)[1] if "." in fn else "png"
+        suffix = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24]
+        existing = base / f"workflow_{suffix}.{safe_seg(ext) or 'png'}"
+        if existing.exists():
+            return str(existing)
     if src:
         data, ext = _from_src(src)
     else:
@@ -81,10 +99,22 @@ def save_local(
             raise ComfyError("取原图失败", 502)
         fn = Path(filename).name
         ext = fn.rsplit(".", 1)[1] if "." in fn else "png"
-    from app.services import repo_meta
-    base = repo_meta.repo_folder(output_dir, repo_id)  # 文件夹名=仓库名(保中文)，并写 _repo.json
+    # 上传的参考图落 reference/ 子夹，与生成图（根目录）分开。子夹名做安全化防路径穿越。
     # 统一按本仓库文件夹自己的顺序编号命名——不沿用 ComfyUI 的 uid_编号(会随重启从头计数、
     # 删图后新图撞旧编号导致覆盖)。每个仓库独立编号，跨来源都不撞名。
-    dest = base / _next_seq_name(base, ext)
-    dest.write_bytes(data)
+    if idempotency_key:
+        suffix = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24]
+        dest = base / f"workflow_{suffix}.{safe_seg(ext) or 'png'}"
+        if dest.exists():
+            return str(dest)
+        tmp = base / f".{dest.name}.{uuid4().hex}.tmp"
+        tmp.write_bytes(data)
+        try:
+            os.replace(tmp, dest)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+    else:
+        dest = base / _next_seq_name(base, ext)
+        dest.write_bytes(data)
     return str(dest)

@@ -35,9 +35,14 @@ def folder_name(repo_id: str) -> str:
     return safe_dir(name) if name else safe_seg(repo_id)
 
 
+def repo_folder_path(output_dir: str, repo_id: str) -> Path:
+    """只计算仓库输出路径，不创建目录或写 marker。清理/探测场景使用。"""
+    return Path(output_dir) / folder_name(repo_id)
+
+
 def repo_folder(output_dir: str, repo_id: str) -> Path:
     """返回该仓库的输出文件夹路径并建好，同时写/更新 _repo.json 标记。"""
-    base = Path(output_dir) / folder_name(repo_id)
+    base = repo_folder_path(output_dir, repo_id)
     base.mkdir(parents=True, exist_ok=True)
     write_repo_marker(base, repo_id)
     return base

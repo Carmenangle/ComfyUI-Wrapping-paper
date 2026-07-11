@@ -601,10 +601,11 @@ def update_node_pack_content(cfg: EmbedConfig, pack_id: str, content: str) -> bo
         return False
     m = (existing.get("metadatas", []) or [{}])[0] or {}
     store.update_document(pack_id, Document(page_content=content, metadata=m))
+    _BM25_CACHE.clear()
     return True
 
 
-import re as _re
+import re as _re  # noqa: E402  惰性放在 BM25 段落起始，就近说明用途
 
 # BM25 稀疏索引缓存：key=(collection, base_url, api_key, embed_model)（与 store 同 key，配置变则重建）。
 # 每项 = {"bm25": BM25Okapi, "packs": [pack_dict...]}。全量节点包内容+节点名+标题分词建索引。

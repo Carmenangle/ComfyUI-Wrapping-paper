@@ -113,20 +113,13 @@ def get_template_raw(template_id: str) -> dict:
         workflow = json.loads(Path(src).read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(status_code=400, detail=f"工作流 JSON 解析失败：{e}")
-    exposed_ids = sorted({str(f["node_id"]) for f in tpl.get("exposed", [])})
-    # 若模板记录了节点选择顺序，则按该顺序返回（供 AI 对话/画布按序提供节点）
-    order = [str(i) for i in tpl.get("node_order", [])]
-    input_ids = [str(i) for i in tpl.get("input_node_ids", [])]
-    output_ids = [str(i) for i in tpl.get("output_node_ids", [])]
-    # 画布/AI 需载入的节点 = 选定暴露节点 ∪ 输入节点 ∪ 输出节点（去重保序）
-    base = order or exposed_ids
-    merged: list[str] = []
-    for i in [*base, *input_ids, *output_ids]:
-        if i and i not in merged:
-            merged.append(i)
+    exposed_ids = template_store.ordered_node_ids(tpl)
+    order = tpl.get("node_order", [])
+    input_ids = tpl.get("input_node_ids", [])
+    output_ids = tpl.get("output_node_ids", [])
     return {
         "workflow": workflow,
-        "exposed_ids": merged,
+        "exposed_ids": exposed_ids,
         "node_order": order,
         "description": tpl.get("description", ""),
         "prompt_node_id": tpl.get("prompt_node_id", ""),

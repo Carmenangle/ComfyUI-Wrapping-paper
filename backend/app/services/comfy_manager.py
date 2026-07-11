@@ -8,7 +8,6 @@ Manager 的 HTTP API 怪癖只此一处。前端「节点管理」页四个 tab 
 """
 import json
 from urllib.error import HTTPError
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.services.comfyui_client import ComfyError

@@ -36,19 +36,49 @@ def _path(template_id: str) -> "object":
     return TEMPLATES_DIR / f"{template_id}.json"
 
 
+def _normalize_ids(values) -> list[str]:
+    out: list[str] = []
+    for value in values or []:
+        item = str(value or "").strip()
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
 def _normalize(record: dict) -> dict:
-    """归一化模板：把旧的 prompt_node_id/image_node_id 合并进 input_node_ids，
-    保证老模板无缝兼容新的「替换输入节点 / 替换输出节点」多选结构。"""
+    """返回标准模板副本：节点 id 非空字符串、去重保序，并兼容旧输入字段。"""
     if not isinstance(record, dict):
         return record
-    inputs = list(record.get("input_node_ids") or [])
+    normalized = dict(record)
+    inputs = _normalize_ids(record.get("input_node_ids"))
     for legacy in (record.get("prompt_node_id"), record.get("image_node_id")):
-        s = str(legacy or "")
-        if s and s not in inputs:
-            inputs.append(s)
-    record["input_node_ids"] = inputs
-    record["output_node_ids"] = list(record.get("output_node_ids") or [])
-    return record
+        inputs = _normalize_ids([*inputs, legacy])
+    exposed: list[dict] = []
+    for field in record.get("exposed") or []:
+        if not isinstance(field, dict):
+            continue
+        node_id = str(field.get("node_id") or "").strip()
+        if node_id:
+            exposed.append({**field, "node_id": node_id})
+    normalized.update({
+        "exposed": exposed,
+        "node_order": _normalize_ids(record.get("node_order")),
+        "input_node_ids": inputs,
+        "output_node_ids": _normalize_ids(record.get("output_node_ids")),
+        "prompt_node_id": str(record.get("prompt_node_id") or "").strip(),
+        "image_node_id": str(record.get("image_node_id") or "").strip(),
+    })
+    return normalized
+
+
+def ordered_node_ids(record: dict) -> list[str]:
+    """画布节点顺序：用户顺序、其余暴露节点、输入节点、输出节点。"""
+    tpl = _normalize(record)
+    exposed = [field["node_id"] for field in tpl.get("exposed", [])]
+    return _normalize_ids([
+        *tpl.get("node_order", []), *exposed,
+        *tpl.get("input_node_ids", []), *tpl.get("output_node_ids", []),
+    ])
 
 
 def list_templates() -> list[dict]:
@@ -82,7 +112,7 @@ def save_template(data: dict, template_id: str | None = None) -> dict:
     else:
         template_id = uuid.uuid4().hex
         created = now
-    record = {
+    record = _normalize({
         "id": template_id,
         "name": data.get("name", "未命名模板"),
         "source_path": data.get("source_path", ""),
@@ -91,11 +121,11 @@ def save_template(data: dict, template_id: str | None = None) -> dict:
         "description": data.get("description", ""),
         "prompt_node_id": data.get("prompt_node_id", ""),
         "image_node_id": data.get("image_node_id", ""),
-        "input_node_ids": list(data.get("input_node_ids") or []),
-        "output_node_ids": list(data.get("output_node_ids") or []),
+        "input_node_ids": data.get("input_node_ids", []),
+        "output_node_ids": data.get("output_node_ids", []),
         "created_at": created,
         "updated_at": now,
-    }
+    })
     _path(template_id).write_text(
         json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
     )

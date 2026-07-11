@@ -10,7 +10,6 @@ import threading
 from app.services import comfyui_client as _cc
 from app.services import rag_store as _rag
 from app.services.rag_store import EmbedConfig
-from app.services.comfyui_client import ComfyError
 
 
 # 同步进度（进程内单例，同一时刻只允许一个同步任务）：

@@ -4,6 +4,7 @@ import { getTemplateRaw } from "../api/workflows";
 import type { ChatMessage } from "../types/chat";
 import { fmtOpResults } from "../lib/opResults";
 import { lockUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+import { mergeRequestedNodes } from "../lib/workflowDraft";
 
 // 工作流卡：选中模板后把所选节点逐个嵌入锁定的真实 ComfyUI 画布调参，
 // 「选择完毕」经 ComfyUI 原生 graphToPrompt 抓取合法 API prompt；「AI 编排」触发上层规划。
@@ -11,6 +12,7 @@ export function WorkflowCard({
   msg,
   comfyUrl,
   chatModel,
+  onDraft,
   onDone,
   onReopen,
   onNotify,
@@ -19,7 +21,8 @@ export function WorkflowCard({
   msg: ChatMessage;
   comfyUrl: string;
   chatModel: { baseUrl: string; apiKey: string; modelName: string };
-  onDone: (graph: unknown) => void;
+  onDraft: (draftGraph: unknown) => void;
+  onDone: (draftGraph: unknown, capturedGraph: unknown) => void;
   onReopen: () => void;
   onNotify: (text: string) => void;
   onOrchestrate: () => void;
@@ -34,11 +37,11 @@ export function WorkflowCard({
   useEffect(() => {
     getTemplateRaw(wf.templateId)
       .then((r) => {
-        setFullWorkflow(r.workflow);
+        setFullWorkflow(wf.draftGraph ?? r.workflow);
         setNodeIds(r.exposed_ids || []);
       })
       .catch((e) => setLoadErr((e as Error).message));
-  }, [wf.templateId]);
+  }, [wf.templateId, wf.draftGraph]);
 
   // 「选择完毕」：逐节点抓取最新参数 → 合并进完整工作流 → 用 ComfyUI 自带 graphToPrompt
   // 生成 API prompt（与原生"运行"一致，避免自写转换器出错）→ 存为 capturedGraph
@@ -46,42 +49,20 @@ export function WorkflowCard({
     if (!fullWorkflow) return;
     setBusy(true);
     try {
-      // 深拷贝完整工作流，避免改到原始引用
-      const merged = JSON.parse(JSON.stringify(fullWorkflow));
-      const byId: Record<string, any> = {};
-      if (Array.isArray(merged.nodes)) for (const n of merged.nodes) byId[String(n.id)] = n;
-
-      // 向每个节点 iframe 要最新参数
+      const base = wf.draftGraph ?? fullWorkflow;
       const values = await Promise.all(nodeIds.map((id) => requestNodeValues(id)));
-      for (const v of values) {
-        if (!v || !v.node) continue;
-        const target = byId[String(v.nodeId)];
-        if (!target) continue;
-        // 回填用户改过的部分：widgets_values。连线(inputs[].link)必须以完整工作流为准——
-        // 单节点画布经 keepOnly 清空了连线(link=null)，若整体覆盖 inputs 会把节点原有的
-        // 上游连线(如 api_key←api_set、prompt←文本节点)抹掉，导致 graphToPrompt 出断图、
-        // 提交后报"API key not found / 缺输入"。故按口合并：保留完整工作流的 link，
-        // 仅回填单节点画布里非连线口的 widget 值。
-        if (v.node.widgets_values !== undefined) target.widgets_values = v.node.widgets_values;
-        if (Array.isArray(v.node.inputs) && Array.isArray(target.inputs)) {
-          const srcById: Record<string, any> = {};
-          for (const si of v.node.inputs) srcById[String(si.name)] = si;
-          for (const ti of target.inputs) {
-            const si = srcById[String(ti.name)];
-            if (!si) continue;
-            // 完整工作流里该口本就有连线 → 一律保留，绝不被单节点残缺连线覆盖
-            if (ti.link != null) continue;
-            // 完整工作流里该口无连线时，才采纳单节点画布回传的口值（如 widget 值变化）
-            if (si.widget !== undefined) ti.widget = si.widget;
-          }
-        }
-      }
+      const merged = mergeRequestedNodes(base, values) as any;
+      setFullWorkflow(merged);
+      onDraft(merged);
 
-      // 把合并后的完整工作流交给 ComfyUI 自己转成 API prompt（与原生"运行"完全一致）。
+      // 把最新完整 UI 草稿交给 ComfyUI 原生转换；失败也不会回滚上面的 draft。
       // 自写转换器无法还原自定义 JS 节点的 widget 映射（如 D站画廊的 selection_data），
       // 一旦回退会提交错误 prompt → 出图链断裂。所以原生转换失败就报错让用户重试，绝不静默回退。
       // ops 非空时：在全图 iframe 载入后先执行 AI 的输入口操作（含新建 LoadImage/连线），再抓取。
-      const { prompt: apiPrompt, opResults } = await captureApiPrompt(merged, ops);
+      const { prompt: apiPrompt, workflow: capturedDraft, opResults } = await captureApiPrompt(merged, ops);
+      const finalDraft = capturedDraft || merged;
+      setFullWorkflow(finalDraft);
+      onDraft(finalDraft);
       if (!apiPrompt) {
         onNotify("用 ComfyUI 原生转换工作流超时/失败，请重试「选择完毕」（首次需等 ComfyUI 在后台载入完成）。");
         return; // 不存、不标记完成，避免提交错误的手写转换结果
@@ -90,7 +71,7 @@ export function WorkflowCard({
         const okN = (opResults || []).filter((r: any) => r.ok).length;
         onNotify(`AI 已写入 ${okN}/${ops.length} 个输入口：\n${fmtOpResults(opResults || [])}\n参数已确认，直接输入 /s 出图。`);
       }
-      onDone(apiPrompt);
+      onDone(finalDraft, apiPrompt);
     } catch (e) {
       onNotify(`抓取参数失败：${(e as Error).message}`);
     } finally {
@@ -113,7 +94,7 @@ export function WorkflowCard({
   // ops 非空时：载入后先执行 AI 的输入口操作（apply_ops，含新建 LoadImage/连线），再抓取。
   // 返回 { prompt, opResults }；prompt 为 null 表示转换失败。
   const captureApiPrompt = (workflow: any, ops?: any[]) =>
-    new Promise<{ prompt: any | null; opResults: any[] }>((resolve) => {
+    new Promise<{ prompt: any | null; workflow: any | null; opResults: any[] }>((resolve) => {
       const frame = document.createElement("iframe");
       frame.style.cssText = "position:fixed;width:1200px;height:800px;left:-9999px;top:0;border:0;";
       frame.src = lockUrl(comfyUrl);
@@ -126,7 +107,7 @@ export function WorkflowCard({
         window.removeEventListener("message", onMsg);
         try { frame.remove(); } catch { /* ignore */ }
         console.log("[laf capture] finish, got prompt:", !!val);
-        resolve({ prompt: val, opResults });
+        resolve({ prompt: val?.prompt ?? null, workflow: val?.workflow ?? workflow, opResults });
       };
       const sendLoad = () => {
         if (loadSent) return;
@@ -162,11 +143,11 @@ export function WorkflowCard({
           setTimeout(requestPrompt, 300); // 操作落图后再抓取
         } else if (d.type === "api_prompt") {
           if (d.payload?.ok && d.payload.output) {
-            finish(d.payload.output);
+            finish({ prompt: d.payload.output, workflow: d.payload.workflow || workflow });
           } else if (tries++ < 3) {
             setTimeout(requestPrompt, 600); // 转换暂未就绪 → 重试
           } else {
-            finish(null);
+            finish({ prompt: null, workflow: d.payload?.workflow || workflow });
           }
         }
       };

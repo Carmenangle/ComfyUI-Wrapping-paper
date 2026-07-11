@@ -840,9 +840,9 @@ if (LOCK) {
             // 否则永远不返回、api_prompt 永不回传。用 setTimeout（后台 iframe 仍会触发）。
             await new Promise((r) => setTimeout(r, 400));
             const p = await app.graphToPrompt();
-            toParent("api_prompt", { output: p.output, ok: true });
+            toParent("api_prompt", { output: p.output, workflow: serialize(), ok: true });
           } catch (e) {
-            toParent("api_prompt", { ok: false, error: String(e && e.message || e) });
+            toParent("api_prompt", { ok: false, error: String(e && e.message || e), workflow: serialize() });
           }
         } else if (d.type === "request_node") {
           // payload: { nodeId } —— 单节点卡：回传该节点的最新参数，供父页面合并进完整工作流
@@ -989,9 +989,9 @@ if (FULL) {
           try {
             await new Promise((r) => setTimeout(r, 300));
             const p = await app.graphToPrompt();
-            toParent("api_prompt", { output: p.output, ok: true });
+            toParent("api_prompt", { output: p.output, workflow: serialize(), ok: true });
           } catch (e) {
-            toParent("api_prompt", { ok: false, error: String(e) });
+            toParent("api_prompt", { ok: false, error: String(e), workflow: serialize() });
           }
         } else if (d.type === "clear_graph") {
           // 父页面请求清空画布（AI 搭工作流从空白起步）

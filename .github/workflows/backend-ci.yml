@@ -1,0 +1,46 @@
+# CI 门禁：把 import-linter / ruff / 硬编码扫描 / pytest 变成 push+PR 的自动检查。
+# 与本地 pre-commit 同一套规则，防「本地过、合并挂」。Linux runner 用 PyPI 装依赖(非国内镜像)。
+name: backend-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"        # 防 GBK 读 .importlinter 中文契约名乱码（本地 Windows 同款问题）
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: ruff 静态检查
+        run: ruff check app
+
+      - name: import-linter 分层依赖护栏
+        run: lint-imports
+
+      - name: mypy 契约模块类型门禁
+        run: python -m mypy @mypy_files.txt
+
+      - name: 硬编码地址门禁
+        run: python scripts/check_hardcode.py
+
+      - name: pytest
+        run: python -m pytest -q

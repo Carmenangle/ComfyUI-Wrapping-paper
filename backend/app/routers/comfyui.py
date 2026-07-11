@@ -4,7 +4,11 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.services import comfyui_client, comfy_launcher, image_store, template_store, workflow_injector
+from app.config import COMFYUI_BASE_URL
+from app.services import (
+    comfyui_client, comfy_launcher, generation_store, image_store,
+    template_store, workflow_injector,
+)
 from app.services.comfyui_client import ComfyError
 from app.services.comfy_launcher import LaunchError
 from app.services.workflow_convert import ui_to_api
@@ -21,17 +25,17 @@ def list_comfyui() -> dict[str, object]:
 
 class StartRequest(BaseModel):
     path: str          # ComfyUI 目录（含 main.py）
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
 
 
 @router.get("/status")
-def status(url: str = "http://127.0.0.1:8188") -> dict[str, object]:
+def status(url: str = COMFYUI_BASE_URL) -> dict[str, object]:
     return {"running": _is_up(url), "managed": comfy_launcher.is_managed()}
 
 
 class ComfyConfig(BaseModel):
     path: str = ""
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
 
 
 @router.get("/config")
@@ -76,7 +80,7 @@ class SubmitRequest(BaseModel):
     template_id: str
     values: dict[str, object] = {}   # key = "node_id.field" -> 覆盖值
     prompt: str = ""                 # 可选：自动注入到模板 prompt_node_id 的文本字段（/g 用）
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
 
 
 @router.post("/submit")
@@ -119,7 +123,7 @@ def submit(req: SubmitRequest) -> dict[str, object]:
 
 class SubmitGraphRequest(BaseModel):
     workflow: dict[str, object]      # iframe 回传的完整工作流 JSON（含用户改过的 widget 值）
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
 
 
 @router.post("/submit_graph")
@@ -150,7 +154,7 @@ def submit_graph(req: SubmitGraphRequest) -> dict[str, object]:
 @router.post("/upload")
 def upload_image(
     file: UploadFile = File(...),
-    url: str = Form("http://127.0.0.1:8188"),
+    url: str = Form(COMFYUI_BASE_URL),
 ) -> dict[str, object]:
     """把图片转发上传到 ComfyUI 的 input 目录，返回其文件名（供 LoadImage 引用）。"""
     if not _is_up(url):
@@ -164,7 +168,7 @@ def upload_image(
 
 
 @router.get("/result")
-def result(prompt_id: str, url: str = "http://127.0.0.1:8188") -> dict[str, object]:
+def result(prompt_id: str, url: str = COMFYUI_BASE_URL) -> dict[str, object]:
     """轮询某次生成的状态与产出图片。返回 status 与 images（可直接用 /comfyui/view 取图）。"""
     try:
         return comfyui_client.fetch_result(url, prompt_id)
@@ -172,8 +176,53 @@ def result(prompt_id: str, url: str = "http://127.0.0.1:8188") -> dict[str, obje
         raise HTTPException(status_code=e.status, detail=e.detail)
 
 
+class FinalizeGenerationImage(BaseModel):
+    filename: str
+    subfolder: str = ""
+    type: str = "output"
+
+
+class FinalizeGenerationRequest(BaseModel):
+    thread_id: str
+    repo_id: str
+    prompt_id: str
+    prompt: str = ""
+    images: list[FinalizeGenerationImage] = []
+    output_dir: str = ""
+    comfyui_url: str = COMFYUI_BASE_URL
+    embed_base: str = ""
+    embed_key: str = ""
+    embed_model: str = "text-embedding-3-small"
+    chat_base: str = ""
+    chat_key: str = ""
+    chat_model: str = ""
+
+
+@router.post("/finalize-generation")
+def finalize_generation(req: FinalizeGenerationRequest) -> dict[str, object]:
+    """持久化一批已完成的工作流产出；查询结果的 GET 路由保持无副作用。"""
+    try:
+        return generation_store.finalize_workflow_batch(
+            thread_id=req.thread_id,
+            repo_id=req.repo_id,
+            prompt_id=req.prompt_id,
+            prompt=req.prompt,
+            images=[image.model_dump() for image in req.images],
+            output_dir=req.output_dir,
+            comfyui_url=req.comfyui_url,
+            embed_base=req.embed_base,
+            embed_key=req.embed_key,
+            embed_model=req.embed_model,
+            chat_base=req.chat_base,
+            chat_key=req.chat_key,
+            chat_model=req.chat_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 class InterruptRequest(BaseModel):
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
     prompt_id: str = ""            # 有则先从队列删除未执行项，再中断正在执行的
 
 
@@ -190,7 +239,7 @@ def interrupt(req: InterruptRequest) -> dict[str, object]:
 
 
 @router.get("/view")
-def view(filename: str, type: str = "output", subfolder: str = "", url: str = "http://127.0.0.1:8188"):
+def view(filename: str, type: str = "output", subfolder: str = "", url: str = COMFYUI_BASE_URL):
     """代理 ComfyUI 的 /view，返回图片二进制（避免前端跨域直连 8188）。"""
     from fastapi.responses import Response
 
@@ -207,8 +256,9 @@ class SaveLocalRequest(BaseModel):
     type: str = "output"
     repo_id: str = "home"
     output_dir: str = ""                 # 设置里的输出图片路径
-    url: str = "http://127.0.0.1:8188"
+    url: str = COMFYUI_BASE_URL
     src: str = ""                        # 通用模式：完整图片 URL 或 data URI（云端生图用）
+    subdir: str = ""                     # 落到 <repo>/<subdir>/ 子夹（用户上传参考图 → reference）
 
 
 @router.post("/save-local")
@@ -229,6 +279,7 @@ def save_local(req: SaveLocalRequest) -> dict[str, object]:
             subfolder=req.subfolder,
             type=req.type,
             url=req.url,
+            subdir=req.subdir,
         )
     except ComfyError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)

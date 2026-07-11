@@ -89,6 +89,36 @@ export function getResult(promptId: string, url: string) {
   );
 }
 
+export interface FinalizedMessage {
+  id: string;
+  role: "assistant";
+  text: string;
+  image?: string;
+}
+
+export interface FinalizeGenerationResponse {
+  prompt_id: string;
+  durable: boolean;
+  complete: boolean;
+  messages: FinalizedMessage[];
+  images: { message_id: string; display_url: string; persisted: boolean; indexed: boolean; snapshotted: boolean; errors: string[] }[];
+}
+
+export function finalizeGeneration(args: {
+  threadId: string; repoId: string; promptId: string; prompt: string;
+  images: ResultImage[]; outputDir: string; comfyuiUrl: string;
+  embed: { baseUrl: string; apiKey: string; modelName: string };
+  chat: { baseUrl: string; apiKey: string; modelName: string };
+}) {
+  return apiPost<FinalizeGenerationResponse>("/comfyui/finalize-generation", {
+    thread_id: args.threadId, repo_id: args.repoId, prompt_id: args.promptId,
+    prompt: args.prompt, images: args.images, output_dir: args.outputDir,
+    comfyui_url: args.comfyuiUrl, embed_base: args.embed.baseUrl,
+    embed_key: args.embed.apiKey, embed_model: args.embed.modelName,
+    chat_base: args.chat.baseUrl, chat_key: args.chat.apiKey, chat_model: args.chat.modelName,
+  });
+}
+
 // 拼出经后端代理的取图地址
 export function viewUrl(img: ResultImage, url: string): string {
   const qs = new URLSearchParams({
@@ -119,12 +149,14 @@ export function localViewUrl(path: string): string {
   return `${API_BASE}/comfyui/local-view?path=${encodeURIComponent(path)}`;
 }
 
-// 通用模式留存：把任意图片地址（云端直链 / data URI）存到 outputDir
-export function saveLocalSrc(args: { src: string; repoId: string; outputDir: string }) {
+// 通用模式留存：把任意图片地址（云端直链 / data URI）存到 outputDir。
+// subdir 非空时落到 <repo>/<subdir>/ 子夹（用户上传的参考图 → reference）。
+export function saveLocalSrc(args: { src: string; repoId: string; outputDir: string; subdir?: string }) {
   return apiPost<{ ok: boolean; path: string }>("/comfyui/save-local", {
     src: args.src,
     repo_id: args.repoId,
     output_dir: args.outputDir,
+    subdir: args.subdir || "",
   });
 }
 

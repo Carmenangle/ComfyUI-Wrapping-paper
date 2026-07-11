@@ -192,44 +192,9 @@ export function chatStream(
   }, (obj) => { if (obj.delta) onDelta(String(obj.delta)); }, onDone);
 }
 
-// 图像智能体流式调用：对话模型自主调反推/生图工具。
-// onDelta 文本增量；onImage 生成的图片地址（可多张）；onDone 收尾。返回中止函数。
-export function imageAgentStream(
-  threadId: string,
-  message: string,
-  images: string[],
-  chat: { baseUrl: string; apiKey: string; modelName: string },
-  gen: { baseUrl: string; apiKey: string; modelName: string },
-  size: string,
-  onDelta: (text: string) => void,
-  onImage: (url: string, id?: string) => void,
-  onDone: (err?: string) => void,
-  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; messageId?: string; proxyUrl?: string; style?: string; styleTemplate?: string; agentId?: string },
-  onInspiration?: (card: Inspiration & { id?: string }) => void,
-): () => void {
-  return openSSE("/ai/image-agent", {
-    thread_id: threadId,
-    message,
-    images,
-    ...chatBody(chat),
-    gen_base_url: gen.baseUrl,
-    gen_api_key: gen.apiKey,
-    gen_model: gen.modelName,
-    size,
-    output_dir: persist?.outputDir || "",
-    repo_id: persist?.repoId || "",
-    ...sseEmbed(persist?.embed),
-    message_id: persist?.messageId || "",
-    proxy_url: persist?.proxyUrl || "",
-    style: persist?.style || "",
-    style_template: persist?.styleTemplate || "",
-    agent_id: persist?.agentId || "",
-  }, (obj) => {
-    if (obj.delta) onDelta(String(obj.delta));
-    if (obj.image) onImage(String(obj.image), obj.image_id as string | undefined);
-    if (obj.inspiration) onInspiration?.(obj.inspiration as Inspiration & { id?: string });
-  }, onDone);
-}
+// 单 agent 对外入口（imageAgentStream / POST /ai/image-agent）已下线：其大脑降级为多 Agent 的
+// tool_agent 专家节点（见后端 agent_graph.tool_agent_node）。自由文本一律走 multiAgent（Supervisor 编排）。
+// 注：/ai/image-agent/running 与 /ai/image-agent/cancel 仍保留——它们是后台化的共用机制，多 Agent 同用。
 
 // 拉取某仓库已落盘的对话历史（刷新/进入仓库时回填）
 export function fetchHistory(threadId: string) {  return apiGet<{ items: ChatTurn[] }>(
@@ -252,7 +217,7 @@ export function multiAgent(
     onInspiration?: (card: Inspiration & { id?: string }) => void;
     onDone: (err?: string) => void;
   },
-  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; proxyUrl?: string; routeModel?: string },
+  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; proxyUrl?: string; routeModel?: string; messageId?: string; styleTemplate?: string; agentId?: string },
 ): () => void {
   return openSSE("/ai/multi-agent", {
     thread_id: threadId,
@@ -268,6 +233,9 @@ export function multiAgent(
     ...sseEmbed(persist?.embed),
     proxy_url: persist?.proxyUrl || "",
     route_model: persist?.routeModel || "",
+    message_id: persist?.messageId || "",
+    style_template: persist?.styleTemplate || "",
+    agent_id: persist?.agentId || "",
   }, (obj) => {
     if (obj.trace) cbs.onTrace(String(obj.trace));
     if (obj.delta) cbs.onDelta(String(obj.delta));
@@ -279,6 +247,14 @@ export function multiAgent(
 // 清空某仓库对话线
 export function clearHistory(threadId: string) {
   return apiPost<{ ok: boolean }>("/ai/chat/clear", { thread_id: threadId });
+}
+
+// 清除缓存：清对话线+前端快照+删本仓库 reference/ 上传参考图。资产库与知识库不动。返回删了几张参考图。
+export function clearCache(threadId: string, outputDir: string) {
+  return apiPost<{ ok: boolean; removed: number }>(
+    "/ai/chat/clear-cache",
+    { thread_id: threadId, output_dir: outputDir },
+  );
 }
 
 // 压缩对话上下文：AI 把历史+生成记录总结成一条摘要，清空对话线与快照，只留摘要。

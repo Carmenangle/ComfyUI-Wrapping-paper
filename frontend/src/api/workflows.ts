@@ -55,12 +55,12 @@ export interface Template {
   name: string;
   source_path: string;
   exposed: ExposedField[];
-  node_order?: string[];
+  node_order: string[];
   description?: string;
   prompt_node_id?: string;
   image_node_id?: string;
-  input_node_ids?: string[];
-  output_node_ids?: string[];
+  input_node_ids: string[];
+  output_node_ids: string[];
   created_at: number;
   updated_at: number;
 }

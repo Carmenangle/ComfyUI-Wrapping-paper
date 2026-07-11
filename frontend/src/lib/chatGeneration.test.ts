@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { needsImageInput, hasImageProvided, pickBestText, slimSnapshot } from "./chatGeneration";
+import {
+  needsImageInput, hasImageProvided, pickBestText, shouldFinalize, slimSnapshot,
+  registerPending, unregisterPending, pendingResumeAction, pollSchedule,
+} from "./chatGeneration";
 import type { Template } from "../api/workflows";
 import type { ChatMessage } from "../types/chat";
 
 const tpl = (over: Partial<Template>): Template => ({
   id: "t1", name: "x", source_path: "", exposed: [],
+  node_order: [], input_node_ids: [], output_node_ids: [],
   created_at: 0, updated_at: 0, ...over,
 });
 
@@ -88,9 +92,86 @@ describe("slimSnapshot", () => {
     const out = await slimSnapshot(msgs, persist);
     expect(out[0].portsPlan?.images).toEqual(["local://x"]);
   });
+  it("工作流 UI 草稿与执行图保持不变", async () => {
+    const draftGraph = { nodes: [{ id: 51, properties: { selection_data: "new" } }], links: [[1]] };
+    const capturedGraph = { "51": { class_type: "DanbooruGalleryNode", inputs: { bypass_prompts: "new" } } };
+    const msgs: ChatMessage[] = [{
+      id: "w", role: "assistant", text: "",
+      workflow: { templateId: "t", templateName: "x", draftGraph, capturedGraph, done: true },
+    }];
+    const out = await slimSnapshot(msgs, persist);
+    expect(out[0].workflow?.draftGraph).toEqual(draftGraph);
+    expect(out[0].workflow?.capturedGraph).toEqual(capturedGraph);
+  });
   it("无图消息原样返回", async () => {
     const msgs: ChatMessage[] = [{ id: "1", role: "assistant", text: "纯文本" }];
     const out = await slimSnapshot(msgs, persist);
     expect(out).toEqual(msgs);
+  });
+});
+
+describe("pending generation", () => {
+  it("注册时去重后追加，且不修改输入", () => {
+    const input = [
+      { prompt_id: "p1", createdAt: 1 },
+      { prompt_id: "p2", createdAt: 2 },
+    ];
+    expect(registerPending(input, "p1", 3)).toEqual([
+      { prompt_id: "p2", createdAt: 2 },
+      { prompt_id: "p1", createdAt: 3 },
+    ]);
+    expect(input).toEqual([
+      { prompt_id: "p1", createdAt: 1 },
+      { prompt_id: "p2", createdAt: 2 },
+    ]);
+  });
+
+  it("删除只移除指定任务并保持顺序", () => {
+    const input = [
+      { prompt_id: "p1", createdAt: 1 },
+      { prompt_id: "p2", createdAt: 2 },
+    ];
+    expect(unregisterPending(input, "p1")).toEqual([{ prompt_id: "p2", createdAt: 2 }]);
+    expect(unregisterPending(input, "missing")).toEqual(input);
+  });
+
+  it("恢复判定保持已处理和 30 分钟边界", () => {
+    const item = { prompt_id: "p1", createdAt: 1000 };
+    expect(pendingResumeAction(item, new Set(["p1"]), 1000)).toBe("skip");
+    expect(pendingResumeAction(item, new Set(), 1000 + 30 * 60 * 1000)).toBe("inspect");
+    expect(pendingResumeAction(item, new Set(), 1001 + 30 * 60 * 1000)).toBe("expire");
+  });
+
+  it.each([
+    [149, false, 2000],
+    [150, true, 15000],
+    [151, false, 15000],
+    [209, false, 15000],
+    [210, false, null],
+  ])("第 %i 次轮询维持原调度", (tries, releaseBusy, delayMs) => {
+    expect(pollSchedule(tries)).toEqual({ releaseBusy, delayMs });
+  });
+});
+
+describe("shouldFinalize", () => {
+  const pend = (...ids: string[]) => ids.map((prompt_id) => ({ prompt_id }));
+
+  it("无 promptId → 直接放行（老路径兼容）", () => {
+    expect(shouldFinalize(undefined, [], new Set())).toBe(true);
+  });
+  it("promptId 在 pending 且未收尾 → 放行", () => {
+    expect(shouldFinalize("p1", pend("p1"), new Set())).toBe(true);
+  });
+  it("promptId 已不在 pending（别的路径已收尾）→ 拦（治重挂后重复出图）", () => {
+    expect(shouldFinalize("p1", pend("p2"), new Set())).toBe(false);
+  });
+  it("promptId 在内存已收尾集合（并发窗口）→ 拦", () => {
+    expect(shouldFinalize("p1", pend("p1"), new Set(["p1"]))).toBe(false);
+  });
+  it("pending 为空 → 拦", () => {
+    expect(shouldFinalize("p1", [], new Set())).toBe(false);
+  });
+  it("两闸都触发 → 拦", () => {
+    expect(shouldFinalize("p1", pend("p2"), new Set(["p1"]))).toBe(false);
   });
 });

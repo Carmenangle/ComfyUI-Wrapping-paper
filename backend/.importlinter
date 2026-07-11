@@ -1,0 +1,20 @@
+; 架构护栏：把 docs/ARCHITECTURE.md 的准入规则 #2 变成可执行门禁。
+; 跑：cd backend && .venv/Scripts/python -m importlinter.cli lint  （或 lint-imports）
+[importlinter]
+root_package = app
+
+[importlinter:contract:services-not-depend-on-routers]
+name = services 层不得依赖 routers 层（分层：路由薄、业务下沉，service 可独立单测）
+type = forbidden
+source_modules =
+    app.services
+forbidden_modules =
+    app.routers
+
+[importlinter:contract:background-run-stack-layers]
+name = 后台运行栈方向：agent_runner 依赖底座(thread_admission/agent_contracts)，底座不得反向依赖
+type = layers
+layers =
+    app.services.agent_runner
+    app.services.thread_admission | app.services.agent_contracts
+

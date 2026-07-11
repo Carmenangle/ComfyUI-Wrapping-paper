@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from app.services import image_gen, generation_store, llm as _llm
-from app.services.image_utils import extract_image_url
+from app.services.message_images import extract_image_url
 from app.services.image_prompt_style import guidance_for
 
 # 通用规则；生图提示词的「风格写法」仅在用户选了自定义风格存档时才在 _build 里拼接（见 image_prompt_style）。
@@ -50,7 +50,8 @@ def _build(chat_base: str, chat_key: str, chat_model: str,
            thread_id: str = "home", output_dir: str = "", repo_id: str = "home",
            embed_base: str = "", embed_key: str = "", embed_model: str = "embedding-3",
            insp_sink: list[dict] | None = None, proxy_url: str = "", style: str = "",
-           style_template: str = "", has_images: bool = False, agent_id: str = ""):
+           style_template: str = "", has_images: bool = False, agent_id: str = "",
+           memory_mode: str = "legacy_checkpoint"):
     """构建 agent。image_sink 收集本轮生成的图片地址，供路由透出。
     出图时后端同步落盘：下载留存→入库→追加进 chat_snapshot，前端断开也不丢。
     has_images=True（本轮用户带图）时裁剪工具集，物理上只保留 image_to_image，
@@ -239,11 +240,12 @@ def _build(chat_base: str, chat_key: str, chat_model: str,
             system_prompt += "\n\n【用户自定义技能】\n" + "\n".join(f"- {f}" for f in frags)
     except Exception:
         pass
+    checkpointer = get_saver() if memory_mode == "legacy_checkpoint" else None
     return create_agent(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        checkpointer=get_saver(),
+        checkpointer=checkpointer,
     )
 
 
@@ -254,7 +256,7 @@ def stream_agent(thread_id: str, message: str, images: list[str] | None,
                  embed_base: str = "", embed_key: str = "",
                  embed_model: str = "embedding-3", cancel_event=None,
                  proxy_url: str = "", style: str = "", style_template: str = "",
-                 agent_id: str = "") -> Iterator[dict]:
+                 agent_id: str = "", memory_mode: str = "legacy_checkpoint") -> Iterator[dict]:
     """运行智能体，逐步产出事件 dict：
     {"delta": "..."} 文本增量；{"image": "url"} 生成的图片；{"error": "..."}。
     历史按 thread_id 自动载入续写、落盘（复用 checkpointer）。
@@ -268,15 +270,27 @@ def stream_agent(thread_id: str, message: str, images: list[str] | None,
                    thread_id=thread_id, output_dir=output_dir, repo_id=repo_id or thread_id,
                    embed_base=embed_base, embed_key=embed_key, embed_model=embed_model,
                    insp_sink=insp, proxy_url=proxy_url, style=style, style_template=style_template,
-                   has_images=bool(images), agent_id=agent_id)
+                   has_images=bool(images), agent_id=agent_id, memory_mode=memory_mode)
     config = {"configurable": {"thread_id": thread_id}}
 
+    history_messages = []
+    if memory_mode == "external_turn":
+        try:
+            from app.services import chat_memory
+            from langchain_core.messages import AIMessage
+            for item in chat_memory.get_history(thread_id):
+                text = item.get("content") or ""
+                history_messages.append(HumanMessage(content=text) if item.get("role") == "user"
+                                        else AIMessage(content=text))
+        except Exception:
+            history_messages = []
     if images:
         content: list = [{"type": "text", "text": message or "（见图）"}]
         content += [{"type": "image_url", "image_url": {"url": u}} for u in images]
         human = HumanMessage(content=content)
     else:
         human = HumanMessage(content=message)
+    input_messages = [*history_messages, human]
 
     sent_imgs = 0
     sent_insp = 0
@@ -290,7 +304,7 @@ def stream_agent(thread_id: str, message: str, images: list[str] | None,
         return out
 
     try:
-        for chunk, meta in agent.stream({"messages": [human]}, config,
+        for chunk, meta in agent.stream({"messages": input_messages}, config,
                                         stream_mode="messages"):
             # 协作式取消：置位则停止 yield（在途 LLM 请求返回后即到这里退出），发打断标记
             if cancel_event is not None and cancel_event.is_set():

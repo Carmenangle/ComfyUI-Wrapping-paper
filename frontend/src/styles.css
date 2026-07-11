@@ -1605,6 +1605,7 @@ body {
 .chat-view-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
@@ -2152,6 +2153,8 @@ body {
 /* /w 模板选择浮层 */
 .chat-input-wrap {
   position: relative;
+  z-index: 2;
+  flex-shrink: 0;
 }
 
 .tpl-picker {

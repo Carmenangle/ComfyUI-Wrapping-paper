@@ -16,3 +16,9 @@ COMFY_EXT_DIR = BASE_DIR.parent / "comfyui-ext"
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 COMFYUI_INPUT_DIR = Path(r"D:\tool\ComfyUI\input")
 COMFYUI_OUTPUT_DIR = Path(r"D:\tool\ComfyUI\output")
+
+# 后端自身对外地址（前端通过它回取本地留存图；生成产出 URL 据此拼接）
+BACKEND_BASE_URL = "http://127.0.0.1:8010"
+
+# AI 搭工作流单次编排的总时间预算（秒）；需 < 前端 240s 超时，到点停止重试返回现有结果
+BUILD_TIME_BUDGET_SEC = 200

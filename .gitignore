@@ -1,6 +1,7 @@
 # ===== 依赖 / 构建产物 =====
 backend/.venv/
 frontend/node_modules/
+node_modules/
 frontend/dist/
 *.pyc
 __pycache__/
@@ -29,6 +30,12 @@ _backfill.py
 _check.py
 _chk.py
 _fix*.py
+backend/last_submit_error.json   # 运行时排障产物：上次失败提交的 prompt dump
+
+# ===== 重构旧代码备份 / AI 助手本地目录（不随发布）=====
+backend/_backup_single_agent/
+_backup_single_agent/
+.claude/
 
 # 会上传：backend/app(含内置骨架 skeleton_store) · backend/requirements.txt ·
 #         frontend/src + 配置 · comfyui-ext(laf_lock 扩展) · scripts · start-dev.bat/stop-dev.bat · README.md

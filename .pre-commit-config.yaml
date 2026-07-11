@@ -1,0 +1,36 @@
+# 提交前本地门禁：全部用 repo: local，不拉远程 hook 仓库（离线可用）。
+# 启用：cd backend && .venv/Scripts/python -m pip install pre-commit && cd .. && pre-commit install
+# 手动全跑：pre-commit run --all-files
+# 三道门禁都在 backend/ 下用项目 .venv 跑，并置 PYTHONUTF8=1 防 GBK 读 .importlinter 乱码。
+default_language_version:
+  python: python3
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (backend/app 静态检查)
+        entry: bash -c 'cd backend && PYTHONUTF8=1 .venv/Scripts/python -m ruff check app'
+        language: system
+        pass_filenames: false
+        files: ^backend/app/.*\.py$
+
+      - id: import-linter
+        name: import-linter (分层依赖护栏)
+        entry: bash -c 'cd backend && PYTHONUTF8=1 .venv/Scripts/lint-imports.exe'
+        language: system
+        pass_filenames: false
+        files: ^backend/app/.*\.py$
+
+      - id: mypy
+        name: mypy (契约模块类型门禁)
+        entry: bash -c 'cd backend && PYTHONUTF8=1 .venv/Scripts/python -m mypy @mypy_files.txt'
+        language: system
+        pass_filenames: false
+        files: ^backend/app/.*\.py$
+
+      - id: hardcode-gate
+        name: hardcode-gate (地址字面量只许在 config.py)
+        entry: bash -c 'cd backend && PYTHONUTF8=1 .venv/Scripts/python scripts/check_hardcode.py'
+        language: system
+        pass_filenames: false
+        files: ^backend/app/.*\.py$

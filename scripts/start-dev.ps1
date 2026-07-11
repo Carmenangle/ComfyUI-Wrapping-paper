@@ -90,26 +90,46 @@ function Install-FromMirror([string]$IndexUrl, [string]$TrustedHost) {
 }
 
 # 首次运行装依赖：优先用随包附带的离线依赖(vendor/)离线安装，没有再联网装；都装好则跳过。
-# 用「完成标记文件」判断是否真装好——只看 python.exe 存在会误判：上次装到一半被关掉，
-# venv 建好了但依赖没装全，下次就会跳过安装导致后端起不来。无标记 = 未完成 → 清残留重装。
-$depMarker = Join-Path $backendDir ".venv\.deps_ok"
-if (-not (Test-Path -LiteralPath $depMarker)) {
+# 用「依赖指纹文件」判断是否需要（重）装——存 requirements.txt 的 hash：
+#   - 无指纹/指纹不符(requirements.txt 改过) → 需要装；
+#   - venv 已在且完好 → 只增量补装(pip install -r 幂等，只装缺的/新增的)，不删 venv；
+#   - venv 缺失或半装(python.exe 都没有) → 清残留全新建。
+# 相比只看 python.exe 存在：能在 requirements.txt 更新后自动补装新依赖，老用户不会因跳过而起不来。
+$reqFile = Join-Path $backendDir "requirements.txt"
+$depFingerprint = Join-Path $backendDir ".venv\.deps_hash"
+$reqHash = (Get-FileHash -LiteralPath $reqFile -Algorithm SHA256).Hash
+$savedHash = if (Test-Path -LiteralPath $depFingerprint) { (Get-Content -LiteralPath $depFingerprint -Raw).Trim() } else { "" }
+$venvOk = Test-Path -LiteralPath $backendPython
+if ($savedHash -ne $reqHash) {
   $py = (Get-Command python -ErrorAction SilentlyContinue)
-  if (-not $py) { throw "未找到 python，请先安装 Python 3.10+ 并加入 PATH" }
-  # 清理上次中断的残留：半装的 venv + pip 下载缓存(避免坏缓存导致反复失败)
-  if (Test-Path -LiteralPath (Join-Path $backendDir ".venv")) {
-    Write-Host "检测到上次未装完的残留，清理后重装..."
-    Remove-Item -LiteralPath (Join-Path $backendDir ".venv") -Recurse -Force -ErrorAction SilentlyContinue
+  if (-not $py -and -not $venvOk) { throw "未找到 python，请先安装 Python 3.10+ 并加入 PATH" }
+  if ($venvOk) {
+    # venv 完好、只是 requirements 变了 → 增量补装(不删 venv，pip 自动跳过已装的)
+    Write-Host "检测到依赖清单有更新，增量补装缺失依赖..."
+  } else {
+    # 无 venv 或半装残留 → 清掉重建
+    if (Test-Path -LiteralPath (Join-Path $backendDir ".venv")) {
+      Write-Host "检测到上次未装完的残留，清理后重装..."
+      Remove-Item -LiteralPath (Join-Path $backendDir ".venv") -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "首次运行：创建后端虚拟环境并安装依赖..."
+    Push-Location $backendDir
+    python -m venv .venv
+    Pop-Location
+    if (-not (Test-Path -LiteralPath $backendPython)) { throw "后端环境创建失败" }
   }
-  Write-Host "首次运行：创建后端虚拟环境并安装依赖..."
   $vendorPy = Join-Path $projectRoot "vendor\pip"    # 离线 wheel 目录(随包附带)
   Push-Location $backendDir
-  python -m venv .venv
   & $backendPython -m pip cache purge 2>$null   # 清 pip 下载缓存，防坏缓存反复失败
+  $installed = $false
   if (Test-Path -LiteralPath $vendorPy) {
     Write-Host "使用随包离线依赖安装(无需联网)..."
     & $backendPython -m pip install --no-index --find-links $vendorPy -r requirements.txt
-  } else {
+    $installed = ($LASTEXITCODE -eq 0)
+    # 离线装失败(常见：vendor 里的 wheel 版本与本机 Python 不匹配) → 回退联网装
+    if (-not $installed) { Write-Host "离线依赖不适用本机(可能 Python 版本不符)，回退联网安装..." }
+  }
+  if (-not $installed) {
     # 联网装：先给各源测速，按速度排序，优先用 >=100KB/s 的快源；
     # 慢源(<100KB/s)排到最后，只有快源都装失败(或全都慢)时才用慢源兜底。
     # 探针用真实大 wheel(numpy ~15MB)而非小索引页——小索引页会被 CDN 边缘缓存+gzip，
@@ -134,7 +154,6 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
       @{ Expression = { $_.speed }; Descending = $true }
 
     # 不单独升级 pip：升级 pip 会连默认源(国外)易卡住/失败，且非必需。装依赖各自指定源。
-    $installed = $false
     foreach ($m in $ordered) {
       if ($m.speed -lt 0) { Write-Host "$($m.name) 测速连不上，跳过(仅在其余源都失败时才回头尝试)"; continue }
       $note = if ($m.speed -lt $SLOW) { "(慢源兜底)" } else { "" }
@@ -172,7 +191,8 @@ if (-not (Test-Path -LiteralPath $depMarker)) {
   if ($LASTEXITCODE -ne 0) {
     throw "依赖校验失败：关键包未装全(可能下载中断)。请重新运行 start-dev.bat 会自动清理残留重装。"
   }
-  New-Item -ItemType File -Path $depMarker -Force | Out-Null   # 打完成标记，下次跳过安装
+  # 写依赖指纹(requirements.txt 的 hash)，下次启动比对：一致则跳过，被改过则自动补装
+  Set-Content -LiteralPath $depFingerprint -Value $reqHash -NoNewline -Encoding ascii
 }
 if (-not (Test-Path -LiteralPath (Join-Path $frontendDir "node_modules"))) {
   Write-Host "首次运行：安装前端依赖..."

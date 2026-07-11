@@ -23,3 +23,11 @@ export function isLafMessage(data: any, type?: string): boolean {
   if (!data || data.source !== "laf_lock") return false;
   return type === undefined || data.type === type;
 }
+
+export function isLafMessageFrom(
+  event: MessageEvent,
+  frameWindow: Window | null | undefined,
+  type?: string,
+): boolean {
+  return !!frameWindow && event.source === frameWindow && isLafMessage(event.data, type);
+}

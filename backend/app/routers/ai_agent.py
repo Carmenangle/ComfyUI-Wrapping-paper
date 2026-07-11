@@ -28,31 +28,9 @@ class ImageAgentRequest(EmbedModelReq):
     agent_id: str = ""                 # 多 Agent：选中的 Agent 预设 id（空=内置默认行为）
 
 
-@router.post("/image-agent")
-def image_agent(req: ImageAgentRequest) -> StreamingResponse:
-    """图像智能体：对话模型自主调反推/生图工具。SSE 流式。
-    事件：{delta} 文本增量；{image} 生成图片地址；{error}；末尾 [DONE]。
-
-    生成跑在后台线程（agent_runner），与 HTTP 连接解耦：客户端切仓库/刷新/关页
-    导致 SSE 断开时，后台线程仍跑完并落盘（生图工具内即时落盘 + 最终文本收尾落盘），
-    重开从快照回显，不丢内容。
-    """
-    from app.services import agent_runner
-
-    if not req.message.strip() and not req.images:
-        raise HTTPException(status_code=400, detail="内容为空")
-
-    q = agent_runner.run_stream(
-        req.thread_id, req.message, req.images or None,
-        req.base_url, req.api_key, req.model,
-        req.gen_base_url, req.gen_api_key, req.gen_model,
-        req.size, req.output_dir, req.repo_id or req.thread_id,
-        req.embed_base_url, req.embed_api_key, req.embed_model,
-        req.message_id, req.proxy_url, req.style, req.style_template,
-        req.agent_id,
-    )
-
-    return sse_response(lambda: agent_runner.drain(q))
+# 单 agent 生成入口（POST /ai/image-agent → agent_runner.run_stream）已下线。
+# 其 ReAct 大脑降级为多 Agent 的 tool_agent 专家节点（承接 MCP/工具串联），自由文本一律走 /multi-agent。
+# 下方 /image-agent/running 与 /image-agent/cancel 保留：后台化的共用机制，多 Agent 同用同一 thread 计数/取消信号。
 
 
 class MultiAgentRequest(ImageAgentRequest):
@@ -62,22 +40,34 @@ class MultiAgentRequest(ImageAgentRequest):
 @router.post("/multi-agent")
 def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
     """Supervisor 多 Agent（LangGraph）：主管判意图→分派生图/图生图/反推/灵感专家。SSE 流式，
-    透出节点流转({trace})供前端展示协作过程。与单 agent(image-agent)并存，用户可切换。"""
-    from app.services import agent_graph
+    透出节点流转({trace})供前端展示协作过程。生成同样跑在 agent_runner 后台线程里。"""
+    from app.services import agent_runner
+    from app.services.agent_contracts import ModelConfig, RunContext
 
     if not req.message.strip() and not req.images:
         raise HTTPException(status_code=400, detail="内容为空")
 
-    def gen():
-        yield from agent_graph.stream_multi_agent(
-            req.thread_id, req.message, req.images or None,
-            req.base_url, req.api_key, req.model,
-            req.gen_base_url, req.gen_api_key, req.gen_model,
-            req.size, req.output_dir, req.repo_id or req.thread_id,
-            req.embed_base_url, req.embed_api_key, req.embed_model,
-            req.proxy_url, req.route_model,
-        )
-    return sse_response(gen)
+    context = RunContext(
+        thread_id=req.thread_id,
+        message=req.message,
+        images=req.images or [],
+        chat=ModelConfig(req.base_url, req.api_key, req.model),
+        generation=ModelConfig(req.gen_base_url, req.gen_api_key, req.gen_model),
+        embedding=ModelConfig(req.embed_base_url, req.embed_api_key, req.embed_model),
+        size=req.size,
+        output_dir=req.output_dir,
+        repo_id=req.repo_id or req.thread_id,
+        message_id=req.message_id,
+        proxy_url=req.proxy_url,
+        route_model=req.route_model,
+        style_template=req.style_template,
+        agent_id=req.agent_id,
+    )
+    try:
+        q = agent_runner.run_multi_stream(context)
+    except agent_runner.RunAlreadyActive as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return sse_response(lambda: agent_runner.drain(q))
 
 
 @router.get("/image-agent/running")

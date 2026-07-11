@@ -70,9 +70,31 @@ def chat_history(thread_id: str = "home") -> dict[str, object]:
 @router.post("/chat/clear")
 def chat_clear(req: HistoryRequest) -> dict[str, object]:
     """清空某仓库对话线。"""
-    from app.services import chat_memory
-    chat_memory.clear_history(req.thread_id)
-    return {"ok": True}
+    from app.services import chat_maintenance
+    try:
+        return chat_maintenance.clear(req.thread_id)
+    except chat_maintenance.MaintenanceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except chat_maintenance.MaintenanceFailed as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class ClearCacheRequest(BaseModel):
+    thread_id: str = "home"
+    output_dir: str = ""        # 输出图片根路径（删 <repo>/reference/ 子夹用）
+
+
+@router.post("/chat/clear-cache")
+def chat_clear_cache(req: ClearCacheRequest) -> dict[str, object]:
+    """清对话、快照和 reference；RAG 与生成资产不属于该维护操作。"""
+    from app.services import chat_maintenance
+    try:
+        result = chat_maintenance.clear_cache(req.thread_id, req.output_dir)
+        return {"ok": True, "removed": result.removed}
+    except chat_maintenance.MaintenanceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except chat_maintenance.MaintenanceFailed as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 class CompactRequest(EmbedModelReq):
@@ -81,31 +103,17 @@ class CompactRequest(EmbedModelReq):
 
 @router.post("/chat/compact")
 def chat_compact(req: CompactRequest) -> dict[str, object]:
-    """压缩对话上下文：读对话历史 + 本仓库生成记录 → AI 总结（几张图/最后提示词/常用模板/模型等）
-    → 清空对话线与前端快照，只留一条摘要消息。知识库(RAG/资产)完全不动，图与提示词记录保留。
-    返回 {ok, summary, message}；message 为写入前端消息流的那条摘要（含 id）。"""
-    import uuid as _uuid
-    from app.services import chat_memory, chat_snapshot, rag_store
-
-    # 生成记录（只读，权威源）；读失败按空处理，不阻断
-    try:
-        gens = rag_store.list_generations(req.thread_id, req.embed_cfg())
-    except Exception:
-        gens = []
+    """压缩对话与快照为同一摘要；generation/RAG 仅作为只读摘要输入。"""
+    from app.services import chat_maintenance
     llm = build_chat_model(req.base_url, req.api_key, req.model, temperature=0.3)
-    result = chat_memory.compact(req.thread_id, llm, gens)
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error") or "无可压缩内容或摘要为空")
-
-    # 重置前端消息流快照为唯一一条摘要（否则刷新会把旧消息全拉回，压缩白做）
-    mid = str(_uuid.uuid4())
-    msg = {"id": mid, "role": "assistant", "text": "【历史摘要】\n" + result["summary"]}
     try:
-        chat_snapshot.save(req.thread_id, [msg])
-    except Exception:
-        pass
-    return {"ok": True, "summary": result["summary"],
-            "image_count": result.get("image_count", 0), "message": msg}
+        return chat_maintenance.compact(req.thread_id, llm, req.embed_cfg())
+    except chat_maintenance.NothingToCompact as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except chat_maintenance.MaintenanceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except chat_maintenance.MaintenanceFailed as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 class AppendRequest(BaseModel):

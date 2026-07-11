@@ -7,12 +7,13 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import COMFYUI_BASE_URL
 from app.services import comfy_manager as _mgr
 from app.services.comfyui_client import ComfyError
 
 router = APIRouter()
 
-_URL = "http://127.0.0.1:8188"
+_URL = COMFYUI_BASE_URL
 
 
 def _guard(fn):

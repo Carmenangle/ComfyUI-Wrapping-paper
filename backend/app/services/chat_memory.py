@@ -79,6 +79,17 @@ def append_message(thread_id: str, role: str, text: str,
     graph.update_state(config, {"messages": [msg]})
 
 
+def append_turn(thread_id: str, user_text: str, images: list[str] | None,
+                assistant_text: str, interrupted: bool = False) -> None:
+    """提交一个完整 Agent turn；调用方只调用一次，Module 统一 user/assistant 顺序。"""
+    if user_text or images:
+        append_message(thread_id, "user", user_text or "（见图）", images or None)
+    text = (assistant_text or "").strip()
+    if text:
+        suffix = "（已打断）" if interrupted else ""
+        append_message(thread_id, "assistant", text + suffix)
+
+
 def mark_interrupted(thread_id: str, user_text: str, images: list[str] | None,
                      partial_text: str) -> None:
     """打断时把「本轮 user 消息 + 半成品 AI 文本」补进 checkpoint，供下一轮续写=合并。
@@ -158,12 +169,8 @@ def get_history(thread_id: str) -> list[dict]:
 
 
 def clear_history(thread_id: str) -> None:
-    """清空某仓库的对话线。"""
-    saver = _get_saver()
-    try:
-        saver.delete_thread(thread_id)
-    except Exception:
-        pass
+    """清空某仓库的对话线；底层失败直接上浮，避免维护操作假成功。"""
+    _get_saver().delete_thread(thread_id)
 
 
 _COMPACT_SYSTEM = (
@@ -179,14 +186,9 @@ _COMPACT_SYSTEM = (
 )
 
 
-def compact(thread_id: str, llm, generations: list[dict] | None = None) -> dict:
-    """压缩某仓库对话：读历史 + 生成记录 → AI 总结 → 清空历史 → 只留一条摘要消息。
-
-    generations 为该仓库 Chroma 生成记录（list_generations 结果，只读不删）——图/提示词的权威源。
-    知识库(RAG/资产)完全不动：本函数只清 chat_memory（对话上下文），Chroma 一条不碰。
-    返回 {ok, summary, image_count}；无历史且无生成记录时不压缩，返回 ok=False。
-    """
-    hist = get_history(thread_id)
+def summarize_history(history: list[dict], llm, generations: list[dict] | None = None) -> dict:
+    """只生成摘要，不修改 checkpoint。破坏性提交由会话维护 Module 统一负责。"""
+    hist = history
     gens = generations or []
     if not hist and not gens:
         return {"ok": False, "summary": "", "image_count": 0}
@@ -220,10 +222,31 @@ def compact(thread_id: str, llm, generations: list[dict] | None = None) -> dict:
     if not summary.strip():
         return {"ok": False, "summary": "", "image_count": len(gens)}
 
-    # 清空对话线，只写回一条摘要（作为后续对话的背景上下文）
-    clear_history(thread_id)
-    append_message(thread_id, "assistant", "【历史摘要】\n" + summary.strip())
     return {"ok": True, "summary": summary.strip(), "image_count": len(gens)}
+
+
+def replace_history(thread_id: str, messages: list[dict]) -> None:
+    """严格替换对话线为给定标准历史；用于维护提交和有限补偿。"""
+    clear_history(thread_id)
+    for message in messages:
+        append_message(
+            thread_id,
+            message.get("role", "assistant"),
+            message.get("content", ""),
+            message.get("images") or None,
+        )
+
+
+def compact(thread_id: str, llm, generations: list[dict] | None = None) -> dict:
+    """兼容旧调用：生成摘要后替换 checkpoint。新维护路径不调用此 Interface。"""
+    result = summarize_history(get_history(thread_id), llm, generations)
+    if result.get("ok"):
+        replace_history(thread_id, [{
+            "role": "assistant",
+            "content": "【历史摘要】\n" + result["summary"],
+            "images": [],
+        }])
+    return result
 
 
 def get_saver() -> SqliteSaver:

@@ -18,7 +18,8 @@ export interface ChatMessage {
   workflow?: {
     templateId: string;
     templateName: string;
-    capturedGraph: unknown | null; // 「选择完毕」时合并参数后的完整工作流
+    draftGraph: unknown | null;    // 可继续编辑的完整 ComfyUI UI workflow
+    capturedGraph: unknown | null; // 原生 graphToPrompt 生成的 API prompt，仅供 /s
     done: boolean;
   };
   // 工作流输入口编排计划：AI 规划「各输入口放什么」，用户确认后写入画布

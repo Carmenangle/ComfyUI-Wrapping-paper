@@ -8,7 +8,8 @@ import {
   listSkeletons, skeletonGraph, type Skeleton,
   listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta,
 } from "../api/ai";
-import { fullUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+import { fullUrl, postToFrame, isLafMessageFrom } from "../lib/lafLock";
+import { useBuildSession } from "../lib/useBuildSession";
 
 // 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
 // pendingNeed=点同意时真正搭建用的需求(原需求+方案)；planText=纯方案文本，供「编辑」填回输入框改。
@@ -39,6 +40,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const skeletonIdRef = useRef<string>("");   // 当前会话用的骨架 id（存进会话）
   const frameRef = useRef<HTMLIFrameElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const buildSession = useBuildSession();
 
   const src = fullUrl(settings.comfyuiUrl);
   const canSend = input.trim().length > 0 && !busy && !!chat.modelName && ready;
@@ -46,7 +48,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   // 收子帧 ready（画布可用）
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
-      if (isLafMessage(ev.data, "ready")) setReady(true);
+      if (isLafMessageFrom(ev, frameRef.current?.contentWindow, "ready")) setReady(true);
     };
     window.addEventListener("message", onMsg);
     // 补一次 ping，防错过首帧 ready
@@ -61,7 +63,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   // 自动保存进度：对话变化后防抖 1.5s 存一次（有内容且画布就绪才存），避免刷新/重启丢进度
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!ready || msgs.length === 0) return;
+    if (!buildSession.canAutosave(ready, msgs.length > 0)) return;
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(() => { saveProgress(true); }, 1500);
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
@@ -111,7 +113,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       localStorage.removeItem("laf_pending_build_graph");
       try {
         const graph = JSON.parse(pending);
-        sessionId && setSessionId("");        // 清当前会话 id → 存时新建，不覆盖用户正在搭的
+        buildSession.startNew();
+        setSessionId("");
         localStorage.removeItem(LAST_KEY);
         postToFrame(frameRef.current?.contentWindow, "load", { workflow: graph });
         push("assistant", "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。");
@@ -126,12 +129,16 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
 
   // 保存当前进度：读回画布图 + 当前对话，存进会话（新建则生成 id）
   const saveProgress = async (silent = false) => {
+    const generation = buildSession.modelRef.current.generation;
+    const currentSessionId = sessionId;
     try {
       const graph = await readGraph();
+      if (!buildSession.owns(generation)) return;
       const r = await saveBuildSession({
-        id: sessionId, name: sessionName, msgs, graph, skeletonId: skeletonIdRef.current,
+        id: currentSessionId, name: sessionName, msgs, graph, skeletonId: skeletonIdRef.current,
       });
-      if (!sessionId) { setSessionId(r.id); localStorage.setItem(LAST_KEY, r.id); }
+      if (!buildSession.finishSave(generation, r.id)) return;
+      if (!currentSessionId) { setSessionId(r.id); localStorage.setItem(LAST_KEY, r.id); }
       refreshSessions();
       if (!silent) setNote(`已保存进度到「${r.name}」`);
     } catch (e) {
@@ -141,8 +148,11 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
 
   // 恢复某会话：拉完整内容 → 恢复对话 → load 画布图回右侧
   const restoreSession = async (id: string) => {
+    const generation = buildSession.startRestore();
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     try {
       const s = await getBuildSession(id);
+      if (!buildSession.finishRestore(generation, s.id)) return;
       setSessionId(s.id);
       setSessionName(s.name);
       skeletonIdRef.current = s.skeleton_id || "";
@@ -160,6 +170,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
 
   // 新建会话：清空对话 + 清空画布 + 重置 id
   const newSession = () => {
+    buildSession.startNew();
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     setSessionId("");
     setSessionName("未命名工作流");
     skeletonIdRef.current = "";
@@ -190,8 +202,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       if (!win) return resolve(null);
       let done = false;
       const onMsg = (ev: MessageEvent) => {
-        if (!isLafMessage(ev.data, expect)) return;
-        if (ev.source !== win) return;
+        if (!isLafMessageFrom(ev, win, expect)) return;
         done = true;
         window.removeEventListener("message", onMsg);
         resolve(ev.data.payload as T);
