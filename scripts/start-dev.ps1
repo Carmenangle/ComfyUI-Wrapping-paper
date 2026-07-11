@@ -122,12 +122,27 @@ if ($savedHash -ne $reqHash) {
   Push-Location $backendDir
   & $backendPython -m pip cache purge 2>$null   # 清 pip 下载缓存，防坏缓存反复失败
   $installed = $false
+  # 先读出本机 venv 的 Python 版本(如 "312")，判断 vendor 里有没有该版本的 wheel。
+  # 为何要判断：pip --find-links 会按本机版本挑 wheel，本机版本不在 vendor 覆盖范围时，
+  # 编译型包(chromadb/tiktoken 等)找不到匹配 wheel 会刷一屏红字才失败——先判断可直接跳过、干净地走联网。
+  $pyTag = (& $backendPython -c "import sys;print(f'{sys.version_info.major}{sys.version_info.minor}')" 2>$null)
+  $vendorHasThisPy = $false
   if (Test-Path -LiteralPath $vendorPy) {
-    Write-Host "使用随包离线依赖安装(无需联网)..."
+    # 该版本被 vendor 覆盖的判据：目录里带 cp<tag> 标签的编译型 wheel 数量达到门槛。
+    # 为何用门槛而非"存在任一"：老版本(如 3.9)可能只有个别包有 cp39 wheel(实测仅 3 个)，
+    # 大多数编译包缺该版本 → 离线装必然失败刷红字。用完整版本(3.10+)实测约 28-30 个做基准，
+    # 取半数(15)为门槛：达标才认定覆盖走离线，否则(3.8=0、3.9=3)干净跳过直接联网。
+    $cpCount = (Get-ChildItem -LiteralPath $vendorPy -Filter "*cp$pyTag*.whl" -ErrorAction SilentlyContinue | Measure-Object).Count
+    $vendorHasThisPy = $pyTag -and ($cpCount -ge 15)
+  }
+  if ($vendorHasThisPy) {
+    Write-Host "检测到 Python 3.$($pyTag.Substring(1)) 的离线依赖，使用随包离线安装(无需联网)..."
     & $backendPython -m pip install --no-index --find-links $vendorPy -r requirements.txt
     $installed = ($LASTEXITCODE -eq 0)
-    # 离线装失败(常见：vendor 里的 wheel 版本与本机 Python 不匹配) → 回退联网装
-    if (-not $installed) { Write-Host "离线依赖不适用本机(可能 Python 版本不符)，回退联网安装..." }
+    # 离线装仍可能失败(个别包缺该版本 wheel) → 回退联网装
+    if (-not $installed) { Write-Host "离线依赖不完整，回退联网安装..." }
+  } elseif (Test-Path -LiteralPath $vendorPy) {
+    Write-Host "随包离线依赖未覆盖本机 Python 版本($pyTag)，直接联网安装..."
   }
   if (-not $installed) {
     # 联网装：先给各源测速，按速度排序，优先用 >=100KB/s 的快源；
