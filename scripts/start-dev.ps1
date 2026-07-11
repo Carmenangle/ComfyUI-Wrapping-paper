@@ -120,7 +120,7 @@ if ($savedHash -ne $reqHash) {
   }
   $vendorPy = Join-Path $projectRoot "vendor\pip"    # 离线 wheel 目录(随包附带)
   Push-Location $backendDir
-  & $backendPython -m pip cache purge 2>$null   # 清 pip 下载缓存，防坏缓存反复失败
+  try { & $backendPython -m pip cache purge *>$null } catch {}   # 清 pip 缓存(缓存空时 pip 往 stderr 打 WARNING，Stop 模式会升级成终止错误，故 try/catch 吞掉)
   $installed = $false
   # 先读出本机 venv 的 Python 版本(如 "312")，判断 vendor 里有没有该版本的 wheel。
   # 为何要判断：pip --find-links 会按本机版本挑 wheel，本机版本不在 vendor 覆盖范围时，
