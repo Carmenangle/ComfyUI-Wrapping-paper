@@ -41,7 +41,7 @@ function parseActiveSeg(text: string): { cmd: string; arg: string } | null {
   const idx = text.lastIndexOf(" + ");
   const seg = idx < 0 ? text : text.slice(idx + 3);
   const m = /^\/(\w+)\s*(.*)$/.exec(seg);
-  return m ? { cmd: m[1], arg: m[2] } : null;
+  return m ? { cmd: m[1].toLowerCase(), arg: m[2] } : null;
 }
 
 export const RichInput = forwardRef<RichInputHandle, Props>(

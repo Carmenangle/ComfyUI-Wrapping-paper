@@ -49,4 +49,20 @@ describe("mergeRequestedNodes", () => {
   it("ignores missing nodes and null responses", () => {
     expect(mergeRequestedNodes(base, [null, { node: { id: 999, widgets_values: ["x"] } }])).toEqual(base);
   });
+
+  it("merges ports that lack link/links without throwing", () => {
+    // 未连线端口/自定义节点常缺 link/links 字段 → 旧 clone(undefined) 抛 "undefined" is not valid JSON
+    const noLink = {
+      nodes: [{
+        id: 51, type: "DanbooruGalleryNode",
+        inputs: [{ name: "image" }],
+        outputs: [{ name: "IMAGE" }],
+      }],
+    };
+    const update = { node: { id: 51, inputs: [{ name: "image", widget: { value: "x.png" } }], outputs: [{ name: "IMAGE" }] } };
+    const result: any = mergeRequestedNodes(noLink, [update]);
+    expect(result.nodes[0].inputs[0]).toMatchObject({ name: "image", widget: { value: "x.png" } });
+    expect(result.nodes[0].inputs[0].link).toBeUndefined();
+    expect(result.nodes[0].outputs[0].links).toBeUndefined();
+  });
 });

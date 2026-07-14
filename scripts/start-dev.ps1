@@ -212,9 +212,26 @@ if ($savedHash -ne $reqHash) {
 if (-not (Test-Path -LiteralPath (Join-Path $frontendDir "node_modules"))) {
   Write-Host "首次运行：安装前端依赖..."
   if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "未找到 npm，请先安装 Node.js 18+" }
+  $npmCache = Join-Path $projectRoot "vendor\npm"      # 前端离线缓存(随包附带，见 pack-npm.ps1)
+  $frontLock = Join-Path $frontendDir "package-lock.json"
   Push-Location $frontendDir
-  npm install
-  Pop-Location
+  try {
+    $frontInstalled = $false
+    # 有随包离线缓存 + 锁文件 → 纯离线装(npm ci --offline，不连 registry)
+    if ((Test-Path -LiteralPath $npmCache) -and (Test-Path -LiteralPath $frontLock)) {
+      Write-Host "检测到前端离线依赖，使用随包离线安装(无需联网)..."
+      & npm ci --offline --cache $npmCache
+      $frontInstalled = ($LASTEXITCODE -eq 0)
+      if (-not $frontInstalled) { Write-Host "前端离线依赖不完整，回退联网安装..." }
+    }
+    # 没缓存/离线装失败 → 联网装(优先淘宝镜像，快)
+    if (-not $frontInstalled) {
+      & npm install --registry https://registry.npmmirror.com
+      if ($LASTEXITCODE -ne 0) { npm install }   # 镜像失败再用默认源
+    }
+  } finally {
+    Pop-Location
+  }
 }
 
 if (Test-PortOpen 8010) {

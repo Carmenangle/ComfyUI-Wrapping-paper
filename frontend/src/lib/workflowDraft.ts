@@ -1,7 +1,9 @@
 const PROTECTED_NODE_FIELDS = new Set(["id", "type", "pos", "size", "order", "inputs", "outputs"]);
 
 function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value));
+  // JSON.stringify(undefined) === undefined → JSON.parse(undefined) 抛 "undefined" is not valid JSON。
+  // 未连线端口/自定义节点常缺 link/links 字段，直接透传 undefined。
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
 }
 
 function mergePorts(basePorts: any[] | undefined, nextPorts: any[] | undefined, linkKey: "link" | "links") {

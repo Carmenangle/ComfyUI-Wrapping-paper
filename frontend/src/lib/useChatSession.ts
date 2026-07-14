@@ -37,6 +37,13 @@ type Model = { baseUrl: string; apiKey: string; modelName: string };
 // 页面刷新(进程重开)即重置为空，但应用运行期间切走首页再回来仍保留。不落 localStorage / 后端快照。
 let homeDraft: ChatMessage[] = [];
 
+// 斜杠指令大小写兼容：只把开头的指令词转小写，参数（模板名/主题）保留原样。
+const normCmd = (text: string): string => {
+  if (!text.startsWith("/")) return text;
+  const sp = text.indexOf(" ");
+  return sp === -1 ? text.toLowerCase() : text.slice(0, sp).toLowerCase() + text.slice(sp);
+};
+
 export interface ChatSessionDeps {
   repo?: Repo;
   settings: ReturnType<typeof useSettings>["settings"];
@@ -493,15 +500,16 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
 
   // /w 选模板、/s 出图的公共前缀路由。命中并处理则返回 true。
-  const routeWorkflowCmd = (text: string): boolean => {
+  const routeWorkflowCmd = (raw: string): boolean => {
+    const text = normCmd(raw);
     if (text === "/w") { setShowPicker(true); return true; }
     if (text.startsWith("/w ")) {
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: raw }]);
       pickByName(text.slice(3).trim());
       return true;
     }
     if (text === "/s") {
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: raw }]);
       runWorkflow();
       return true;
     }
@@ -510,15 +518,16 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // 真正执行一条发送（已确保当前无进行中生成）
   const dispatchSend = (content: RichContent) => {
-    const text = content.text.trim();
-    if (!text && content.images.length === 0) return;
-    if (routeWorkflowCmd(text)) return;
+    const raw = content.text.trim();
+    const text = normCmd(raw);  // 指令词大小写归一，参数保持原样
+    if (!raw && content.images.length === 0) return;
+    if (routeWorkflowCmd(raw)) return;
     // /压缩 或 /compact：压缩当前对话上下文（AI 触发也可在对话里说"压缩上下文"再点确认）
     if (text === "/压缩" || text === "/compact") { compact(); return; }
     // /find 主题：联网找灵感 → 提炼成提示词灵感卡
     if (text === "/find" || text.startsWith("/find ")) {
       const q = text.slice(5).trim();
-      if (!q) { setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]); pushBot("请在 /find 后写要找的灵感主题，如 /find 哥特萝莉裙"); return; }
+      if (!q) { setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: raw }]); pushBot("请在 /find 后写要找的灵感主题，如 /find 哥特萝莉裙"); return; }
       runFindInspiration(q, content);
       return;
     }
@@ -527,7 +536,7 @@ export function useChatSession(deps: ChatSessionDeps) {
       const rest = text.slice(2).trim();  // "模板名 需求"
       const found = findWorkflowCardByName(rest);
       if (!found) {
-        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]);
+        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: raw }]);
         pushBot(rest
           ? `没找到匹配「${rest}」的工作流卡。请先用 /w 选择该工作流，或点卡片上的「AI 编排」。`
           : "请在 /a 后写工作流模板名（或点工作流卡上的「AI 编排」按钮），再补充你的编排需求。");
@@ -541,11 +550,11 @@ export function useChatSession(deps: ChatSessionDeps) {
     // 智能路由：有可编排工作流卡时先让 AI 判断是否编排意图，否则转对话
     const orchCard = findWorkflowCardByName("");
     if (orchCard) {
-      planWorkflowOps(orchCard.card, text, content, false);  // force=false：带意图判定
+      planWorkflowOps(orchCard.card, raw, content, false);  // force=false：带意图判定
       return;
     }
     // 其余一律交给多 Agent（Supervisor 编排，复用同一生命周期）
-    runFreeText(text, content);
+    runFreeText(raw, content);
   };
 
   // 把消息加入队列
@@ -577,10 +586,10 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // AI 建议按钮点击：执行单条指令（/w 选模板、/s 出图）。其余走智能体。
   const runCommand = (cmd: string) => {
-    const text = cmd.trim();
-    if (!text) return;
-    if (routeWorkflowCmd(text)) return;
-    runFreeText(text);
+    const raw = cmd.trim();
+    if (!raw) return;
+    if (routeWorkflowCmd(raw)) return;
+    runFreeText(raw);
   };
   // APPEND5_HERE
 
@@ -673,7 +682,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     if (promptId) {
       try { await interruptComfy(settings.comfyuiUrl, promptId); } catch { /* 忽略 */ }
     }
-    abortRef.current?.();
+    abortRef.current?.abort();
     abortRef.current = null;
   };
 
