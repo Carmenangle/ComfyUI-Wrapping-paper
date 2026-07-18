@@ -108,6 +108,19 @@ describe("slimSnapshot", () => {
     const out = await slimSnapshot(msgs, persist);
     expect(out).toEqual(msgs);
   });
+  it("重生成快照中的参考图被落盘保留", async () => {
+    const msgs: ChatMessage[] = [{
+      id: "g", role: "assistant", text: "", image: "result.png",
+      regeneration: {
+        kind: "ai-image", prompt: "p", images: ["data:image/png;base64,AAAA"],
+        size: "1024x1024", quality: "high",
+        model: { baseUrl: "https://example.test/v1", modelName: "image" },
+      },
+    }];
+    const out = await slimSnapshot(msgs, persist);
+    expect(out[0].regeneration?.kind).toBe("ai-image");
+    expect((out[0].regeneration as any).images).toEqual(["local://x"]);
+  });
 });
 
 describe("pending generation", () => {
@@ -123,6 +136,26 @@ describe("pending generation", () => {
     expect(input).toEqual([
       { prompt_id: "p1", createdAt: 1 },
       { prompt_id: "p2", createdAt: 2 },
+    ]);
+  });
+  it("工作流 pending 绑定自己的完整重生成快照", () => {
+    const regeneration = {
+      kind: "workflow" as const,
+      graph: { "1": { class_type: "KSampler", inputs: { seed: 7 } } },
+      comfyuiUrl: "http://127.0.0.1:8188",
+      outputNodeIds: ["9"],
+      prompt: "",
+    };
+    const out = registerPending([], "prompt-a", 1, ["9"], regeneration);
+    expect(out[0].regeneration).toEqual(regeneration);
+  });
+
+  it("带主输出过滤时记录 outputNodeIds，空数组则省略该键", () => {
+    expect(registerPending([], "p1", 1, ["47"])).toEqual([
+      { prompt_id: "p1", createdAt: 1, outputNodeIds: ["47"] },
+    ]);
+    expect(registerPending([], "p1", 1, [])).toEqual([
+      { prompt_id: "p1", createdAt: 1 },
     ]);
   });
 

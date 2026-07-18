@@ -3,7 +3,7 @@
 // 对外只暴露渲染所需的状态与动作句柄；UI 局部态（模型选择/面板开关/尺寸）留在 ChatView。
 // 接口即测试面：整台生成引擎集中一处，不必渲染千行组件即可推演其行为。
 import { type MutableRefObject, useEffect, useReducer, useRef, useState } from "react";
-import type { ChatMessage, MsgPart } from "../types/chat";
+import type { AgentRoute, ChatMessage, MsgPart, PromptApproval, RegenerationSnapshot, RouteChoice } from "../types/chat";
 import type { Repo } from "../stores/repos";
 import type { useSettings } from "../stores/settings";
 import { activeStyleTemplate } from "../stores/settings";
@@ -17,19 +17,25 @@ import {
 import {
   fetchHistory, multiAgent,
   saveSnapshot, fetchSnapshot, fetchAgentRunning, cancelAgent,
-  fetchInspiration, compactHistory, clearCache,
+  fetchInspiration, regenerateImage as replayImageGeneration,
 } from "../api/ai";
 import {
   reduce as reduceGen, initialGenState,
   streamingBotId, needsConfirm, runningPromptId, queuedItem,
 } from "./generationLifecycle";
 import { useWorkflowOrchestration } from "./workflowOrchestration";
+import { subscribeProgress } from "./comfyProgress";
 import {
   needsImageInput, hasImageProvided, pickBestText, shouldFinalize,
   registerPending, unregisterPending, pendingResumeAction, pollSchedule,
   slimSnapshot as slimSnapshotPure,
 } from "./chatGeneration";
-import { agentImageMessage, inspirationMessage, upsertMessages, workflowMessages } from "./chatSessionEvents";
+import { agentImageMessage, agentVideoMessage, applyPromptApproval, applyRouteChoice, inspirationMessage, upsertMessages, workflowMessages } from "./chatSessionEvents";
+import { recoverCompactedSummaryImage } from "./contextManagement";
+import { recoverAgentRun } from "./agentRecovery";
+import type { ImageQuality } from "./viewRouting";
+import { useChatMaintenance } from "./useChatMaintenance";
+import { resolveImageRegenerationModel, workflowRegenerationSnapshot } from "./regeneration";
 
 type Model = { baseUrl: string; apiKey: string; modelName: string };
 
@@ -47,10 +53,12 @@ const normCmd = (text: string): string => {
 export interface ChatSessionDeps {
   repo?: Repo;
   settings: ReturnType<typeof useSettings>["settings"];
-  setCover: (id: string, cover: string) => void;
+  setGeneratedCover: (id: string, cover: string) => void;
   chat: Model;                                   // 当前对话模型（智能体大脑+反推）
   genModel: Model;                               // 当前生图模型
+  videoModel?: Model;                            // 当前视频模型（videoModels）
   size: string;                                  // 生图尺寸 "宽x高"
+  imageQuality: ImageQuality;                    // GPT Image 质量档；不支持的模型由后端省略
   templates: Template[];
   setShowPicker: (v: boolean) => void;           // 与 /w 选择浮层共享
   atBottomRef: MutableRefObject<boolean>;        // 与滚动跟随 UI 共享
@@ -59,7 +67,10 @@ export interface ChatSessionDeps {
 // PLACEHOLDER_BODY
 
 export function useChatSession(deps: ChatSessionDeps) {
-  const { repo, settings, setCover, chat, genModel, size, templates, setShowPicker, atBottomRef } = deps;
+  const {
+    repo, settings, setGeneratedCover, chat, genModel, videoModel, size, imageQuality,
+    templates, setShowPicker, atBottomRef,
+  } = deps;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // 破坏性操作确认弹窗：由 UI 渲染 ConfirmModal，用户选择后 resolve 这个 promise
@@ -77,11 +88,17 @@ export function useChatSession(deps: ChatSessionDeps) {
   const streamingId = streamingBotId(gen);             // 正在流式的 bot 气泡 id（渲染转圈用）
   const wfRunning = gen.status.kind === "workflow";    // /s 工作流进行中
   const queued = gen.queue;                            // 排队列表（渲染队列条用）
+  const [wfProgress, setWfProgress] = useState<number | null>(null);  // 工作流实时进度%（WS，null=无）
+  const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
+  const wsUnsubRef = useRef<(() => void) | null>(null);  // 当前进度 WS 退订
   const abortRef = useRef<{ botId: string; abort: () => void } | null>(null);  // 中断当前流式生成及其所有者
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);  // 切回后等后台落盘的轮询
   const bgRunningRef = useRef(false);  // 后台任务进行中：此时后端拥有快照写权，前端不抢写以免覆盖
   // 对话线 id = 仓库 id（首页用 "home"）：后端按此落盘多轮记忆与 RAG 知识库
   const threadId = repo?.id || "home";
+  const activeThreadRef = useRef(threadId);
+  activeThreadRef.current = threadId;
+  const recoveryTokenRef = useRef(0);
+  const recoveryActiveRef = useRef(false);
   const chatKey = `laf_chat_${threadId}`;
   const loadedRef = useRef(false);  // 标记本仓库消息已加载，避免初始空数组覆盖已存记录
   const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);  // 后端快照防抖
@@ -92,51 +109,58 @@ export function useChatSession(deps: ChatSessionDeps) {
   const pushMsg = (msg: Partial<ChatMessage>) =>
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: "", ...msg } as ChatMessage]);
 
-  // 压缩上下文：AI 把历史+生成记录总结成一条摘要，清空对话线，只留摘要。知识库/资产不动。
-  // 生成进行中不允许压缩（避免与流式落盘打架）。返回是否成功。
-  const [compacting, setCompacting] = useState(false);
-  const compact = async (): Promise<boolean> => {
-    if (streamingId || wfRunning || compacting) return false;
-    const ok = await askConfirm(
-      "压缩会把本仓库的对话历史总结成一段摘要，并清空当前对话（只保留摘要）。\n" +
-      "已生成的图片、提示词、知识库都会保留，不受影响。确定压缩吗？",
-    );
-    if (!ok) return false;
-    setCompacting(true);
-    try {
-      const r = await compactHistory(threadId, chat, settings.embedModel);
-      if (r.ok && r.message) {
-        setMessages([{ id: r.message.id, role: "assistant", text: r.message.text } as ChatMessage]);
-        return true;
+  const startAgentRecovery = (targetThread = threadId, targetRepoId = repo?.id) => {
+    if (activeThreadRef.current !== targetThread || recoveryActiveRef.current) return;
+    const token = ++recoveryTokenRef.current;
+    recoveryActiveRef.current = true;
+    bgRunningRef.current = true;
+    const knownMedia = new Set(messages.flatMap((message) => [message.image, message.video].filter(Boolean)));
+    let recoveredMedia = "";
+
+    void recoverAgentRun({
+      fetchSnapshot: () => fetchSnapshot(targetThread) as Promise<{ items: ChatMessage[] }>,
+      fetchRunning: () => fetchAgentRunning(targetThread),
+      isActive: () => activeThreadRef.current === targetThread && recoveryTokenRef.current === token,
+      onSnapshot: (items) => {
+        for (const message of items) {
+          const media = message.image || message.video;
+          if (media && !knownMedia.has(media)) recoveredMedia = media;
+        }
+        setMessages((current) => upsertMessages(current, items));
+      },
+    }).then((settled) => {
+      if (!settled || activeThreadRef.current !== targetThread) return;
+      if (recoveredMedia && targetRepoId) setGeneratedCover(targetRepoId, recoveredMedia);
+      if (recoveredMedia) {
+        window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: targetThread }));
       }
-      pushBot("压缩失败：没有可压缩的内容或摘要为空。");
-      return false;
-    } catch (e) {
-      pushBot("压缩失败：" + (e as Error).message);
-      return false;
-    } finally {
-      setCompacting(false);
-    }
+    }).finally(() => {
+      if (recoveryTokenRef.current !== token) return;
+      recoveryActiveRef.current = false;
+      bgRunningRef.current = false;
+    });
   };
 
-  // 清除缓存：清空对话内容 + 删本仓库 reference/ 上传参考图。资产库(生成图)与知识库(RAG)不动。带确认弹窗。
-  const clearCacheAction = async (): Promise<boolean> => {
-    if (streamingId || wfRunning || compacting) return false;
-    const ok = await askConfirm(
-      "清除缓存会清空当前对话内容，并删除本仓库上传的参考图（reference 文件夹）。\n" +
-      "已生成的图片（资产库）和知识库内容都会保留，不受影响。确定清除吗？",
-    );
-    if (!ok) return false;
-    try {
-      await clearCache(threadId, settings.outputDir);
-      setMessages([]);
-      try { localStorage.removeItem(chatKey); } catch { /* 忽略 */ }
-      return true;
-    } catch (e) {
-      pushBot("清除缓存失败：" + (e as Error).message);
-      return false;
-    }
+  const cancelPendingSnapshot = () => {
+    if (!snapTimer.current) return;
+    clearTimeout(snapTimer.current);
+    snapTimer.current = null;
   };
+  const {
+    compact, compacting, clearCache: clearCacheAction,
+    contextReminder, dismissContextReminder,
+  } = useChatMaintenance({
+    threadId,
+    messages,
+    setMessages,
+    isBusy: !!streamingId || wfRunning,
+    chat,
+    embed: settings.embedModel,
+    outputDir: settings.outputDir,
+    reminderTokens: settings.contextReminderTokens,
+    askConfirm,
+    cancelPendingSnapshot,
+  });
 
   // 进入仓库/切换时加载消息，三级兜底：本地 localStorage → 后端消息流快照 → langgraph 对话历史。
   useEffect(() => {
@@ -161,25 +185,10 @@ export function useChatSession(deps: ChatSessionDeps) {
     // 加载兜底的 early-return 之后就永远跑不到，等于后台化失效。
     const maybeStartBgPoll = async () => {
       try {
-        if (!alive || pollRef.current) return;
+        if (!alive || recoveryActiveRef.current) return;
         const st = await fetchAgentRunning(threadId);
         if (!alive || !st.running) return;
-        bgRunningRef.current = true;  // 后台在跑：暂停前端快照写，避免覆盖后端落盘
-        const poll = setInterval(async () => {
-          if (!alive) { clearInterval(poll); return; }
-          try {
-            const [snap, run] = await Promise.all([
-              fetchSnapshot(threadId),
-              fetchAgentRunning(threadId),
-            ]);
-            if (!alive) { clearInterval(poll); return; }
-            if (snap.items && snap.items.length > 0) {
-              setMessages(snap.items as ChatMessage[]);
-            }
-            if (!run.running) { bgRunningRef.current = false; clearInterval(poll); }  // 后台跑完
-          } catch { /* 后端波动，下次再试 */ }
-        }, 1500);
-        pollRef.current = poll;
+        startAgentRecovery(threadId, repo?.id);
       } catch { /* 状态接口失败，忽略 */ }
     };
     (async () => {
@@ -194,7 +203,23 @@ export function useChatSession(deps: ChatSessionDeps) {
         const snap = await fetchSnapshot(threadId);
         if (!alive) return;
         if (snap.items && snap.items.length > 0) {
-          setMessages(snap.items as ChatMessage[]);
+          const snapshotMessages = snap.items as ChatMessage[];
+          let restoredMessages = snapshotMessages;
+          const needsSummaryImage = snapshotMessages.length === 1
+            && snapshotMessages[0].text.startsWith("【历史摘要】")
+            && !snapshotMessages[0].image
+            && !snapshotMessages[0].parts?.some((part) => part.type === "image");
+          if (needsSummaryImage) {
+            try {
+              const history = await fetchHistory(threadId);
+              restoredMessages = recoverCompactedSummaryImage(snapshotMessages, history.items || []);
+            } catch { /* 旧摘要修复失败时仍显示原摘要 */ }
+          }
+          setMessages(restoredMessages);
+          if (restoredMessages !== snapshotMessages) {
+            try { localStorage.setItem(chatKey, JSON.stringify(restoredMessages)); } catch { /* ignore */ }
+            saveSnapshot(threadId, restoredMessages).catch(() => {});
+          }
           loadedRef.current = true;
           await maybeStartBgPoll();
           return;
@@ -224,10 +249,14 @@ export function useChatSession(deps: ChatSessionDeps) {
     })();
     return () => {
       alive = false;
+      activeThreadRef.current = "";
+      recoveryTokenRef.current += 1;
+      recoveryActiveRef.current = false;
+      bgRunningRef.current = false;
       abortRef.current?.abort();
       abortRef.current = null;
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-      bgRunningRef.current = false;
+      if (snapTimer.current) { clearTimeout(snapTimer.current); snapTimer.current = null; }
+      wsUnsubRef.current?.(); wsUnsubRef.current = null;  // 关进度 WS，避免切仓库泄漏连接
       dispatch({ t: "reset" });  // 清空生成状态 + 待发队列，避免串到新仓库
     };
   }, [threadId]);
@@ -246,24 +275,26 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
   const slimSnapshot = (msgs: ChatMessage[]) => slimSnapshotPure(msgs, persistDataUri);
 
-  // 消息变化时持久化：本地即时写（快取）+ 后端快照防抖写（可靠真源）。
+  // 消息变化时持久化：本地快取 + 后端快照统一防抖；本地也写瘦身后内容，避免 dataURI 大图撑爆 localStorage。
   // 首页(home)=临时草稿区：只写模块级 homeDraft（进程内切走切回保留，刷新即空），不落 localStorage / 后端快照。
   useEffect(() => {
     if (!loadedRef.current) return;  // 加载完成前不写，防止空数组覆盖
     if (threadId === "home") { homeDraft = messages; return; }  // 首页草稿区：仅存内存
-    const slim = messages.map((m) =>
-      m.workflow ? { ...m, workflow: { ...m.workflow, capturedGraph: null } } : m,
-    );
-    try {
-      localStorage.setItem(chatKey, JSON.stringify(slim));
-    } catch { /* 超额等忽略 */ }
     if (snapTimer.current) clearTimeout(snapTimer.current);
     const tid = threadId;
+    const original = messages;
     snapTimer.current = setTimeout(async () => {
       if (bgRunningRef.current) return;  // 后台任务在写快照，前端不抢写以免覆盖后端落盘
-      const full = await slimSnapshot(messages);
+      const full = await slimSnapshot(original);
+      // localStorage 只存轻量快取：去掉 capturedGraph，parts / portsPlan 里的 dataURI 已被 slimSnapshot 转成本地 URL。
+      const slim = full.map((m) =>
+        m.workflow ? { ...m, workflow: { ...m.workflow, capturedGraph: null } } : m,
+      );
+      try {
+        localStorage.setItem(chatKey, JSON.stringify(slim));
+      } catch { /* 超额等忽略 */ }
       saveSnapshot(tid, full).catch(() => {});  // 后端未起则忽略，本地仍在
-      if (tid === threadId && JSON.stringify(full) !== JSON.stringify(messages)) {
+      if (tid === threadId && JSON.stringify(full) !== JSON.stringify(original)) {
         setMessages(full);
       }
     }, 600);
@@ -324,11 +355,16 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // ===== 进行中生图任务持久化（切仓库/刷新后可恢复）=====
   const pendingKey = `laf_pending_gen_${threadId}`;
-  const getPending = (): { prompt_id: string; createdAt: number }[] => {
+  const getPending = (): { prompt_id: string; createdAt: number; outputNodeIds?: string[]; regeneration?: RegenerationSnapshot }[] => {
     try { return JSON.parse(localStorage.getItem(pendingKey) || "[]"); } catch { return []; }
   };
-  const addPending = (promptId: string) => {
-    const list = registerPending(getPending(), promptId, Date.now());
+  const addPending = (
+    promptId: string,
+    outputNodeIds: string[] = [],
+    regeneration?: RegenerationSnapshot,
+  ) => {
+    const list = registerPending(
+      getPending(), promptId, Date.now(), outputNodeIds, regeneration);
     try { localStorage.setItem(pendingKey, JSON.stringify(list)); } catch { /* ignore */ }
   };
   const removePending = (promptId: string) => {
@@ -342,27 +378,37 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // 把一次已完成的生成结果交给后端统一留存，再投影为消息。返回是否产出了内容。
   const finalizeGeneration = async (r: GenResult, promptId?: string): Promise<boolean> => {
-    if (!shouldFinalize(promptId, getPending(), finalizedRef.current)) return false;
+    const pending = getPending();
+    if (!shouldFinalize(promptId, pending, finalizedRef.current)) return false;
     const best = pickBestText(r.texts);
-    if ((r.images?.length || 0) === 0 && !best) return false;
+    if ((r.images?.length || 0) === 0 && (r.videos?.length || 0) === 0 && !best) return false;
     if (!promptId) return false;
     finalizedRef.current.add(promptId);
     try {
+      const savedRegeneration = pending.find((item) => item.prompt_id === promptId)?.regeneration;
+      const regeneration = savedRegeneration?.kind === "workflow"
+        ? { ...savedRegeneration, prompt: best }
+        : savedRegeneration;
+      const comfyuiUrl = regeneration?.kind === "workflow"
+        ? regeneration.comfyuiUrl
+        : settings.comfyuiUrl;
       const result = await persistWorkflowGeneration({
         threadId,
         repoId: repo?.id || "home",
         promptId,
         prompt: best,
         images: r.images || [],
+        videos: r.videos || [],
         outputDir: settings.outputDir,
-        comfyuiUrl: settings.comfyuiUrl,
+        comfyuiUrl,
         embed: settings.embedModel,
         chat,
+        regeneration,
       });
       const blocks = workflowMessages(result.messages);
       setMessages((current) => upsertMessages(current, blocks));
       const firstImage = blocks.find((message) => message.image)?.image;
-      if (firstImage && repo?.id) setCover(repo.id, firstImage);
+      if (firstImage && repo?.id) setGeneratedCover(repo.id, firstImage);
       if (result.durable && result.images.some((image) => image.indexed)) {
         window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
       }
@@ -373,22 +419,43 @@ export function useChatSession(deps: ChatSessionDeps) {
     }
   };
 
-  // 轮询某次生成的结果，拿到图片后插入对话流
-  const pollResult = (promptId: string) => {
-    addPending(promptId);  // 记进行中，切仓库/刷新后可恢复
+  // 轮询某次生成的结果，拿到图片/视频后插入对话流
+  // 收尾进度 WS：退订 + 清进度条
+  const stopProgress = () => {
+    wsUnsubRef.current?.();
+    wsUnsubRef.current = null;
+    setWfProgress(null);
+  };
+
+  const pollResult = (
+    promptId: string,
+    outputNodeIds: string[] = [],
+    regeneration?: RegenerationSnapshot,
+  ) => {
+    addPending(promptId, outputNodeIds, regeneration);  // 记进行中（含完整重放参数），切仓库/刷新后可恢复
+    const comfyuiUrl = regeneration?.kind === "workflow"
+      ? regeneration.comfyuiUrl
+      : settings.comfyuiUrl;
     dispatch({ t: "workflowStart", promptId });  // 状态 C：工作流出图中
+    // 实时进度：直连 ComfyUI /ws（完成判定仍以下方轮询为准，WS 只驱动进度条）
+    stopProgress();
+    setWfProgress(0);
+    wsUnsubRef.current = subscribeProgress(comfyuiUrl, promptId, {
+      onProgress: (pct) => setWfProgress(pct),
+    });
     let tries = 0;
     const tick = async () => {
       tries += 1;
       try {
-        const r = await getResult(promptId, settings.comfyuiUrl);
+        const r = await getResult(promptId, comfyuiUrl, outputNodeIds);
         if (r.status === "completed") {
           const got = await finalizeGeneration(r, promptId);
           // 仅当确实无任何产出时提示；去重跳过(got=false 但 r 有内容)不误报
-          if (!got && (r.images?.length || 0) === 0 && !pickBestText(r.texts)) {
-            pushBot("生成完成，但没有输出（工作流未含 SaveImage 或文字输出节点）。");
+          if (!got && (r.images?.length || 0) === 0 && (r.videos?.length || 0) === 0 && !pickBestText(r.texts)) {
+            pushBot("生成完成，但没有输出（工作流未含 SaveImage / 视频合成 / 文字输出节点）。");
           }
           removePending(promptId);
+          stopProgress();
           dispatch({ t: "workflowDone", promptId });  // reducer 内置所有权守卫，只清自己这轮
           return;
         }
@@ -401,6 +468,7 @@ export function useChatSession(deps: ChatSessionDeps) {
       const schedule = pollSchedule(tries);
       if (schedule.releaseBusy) {
         // 快轮询阶段结束仍没完成：解除"运转中"占用不阻塞操作，但继续后台慢守望。
+        stopProgress();
         dispatch({ t: "workflowDone", promptId });
         pushBot("生成较复杂、仍在后台进行，出图后会自动载入（也可在 ComfyUI 面板看进度）。");
       }
@@ -417,8 +485,10 @@ export function useChatSession(deps: ChatSessionDeps) {
   // APPEND3_HERE
 
   // /s 启动：取最近一张已确认的工作流卡，用抓取到的画布工作流提交生成
-  const runWorkflow = async () => {
-    const card = [...messages].reverse().find((m) => m.workflow?.done);
+  const runWorkflow = async (cardId?: string) => {
+    const card = cardId
+      ? messages.find((m) => m.id === cardId && m.workflow?.done)
+      : [...messages].reverse().find((m) => m.workflow?.done);
     if (!card || !card.workflow) {
       pushBot("没有已确认的工作流。先用 /w 选模板，在画布里调好后点「选择完毕」，再 /s 启动。");
       return;
@@ -450,7 +520,10 @@ export function useChatSession(deps: ChatSessionDeps) {
     try {
       const r = await submitGraph(wf.capturedGraph, settings.comfyuiUrl);
       pushBot(`已提交到 ComfyUI 生成（prompt_id: ${r.prompt_id}，${r.node_count} 个节点），正在运转工作流…`);
-      if (r.prompt_id) pollResult(r.prompt_id);
+      const outputNodeIds = tpl?.primary_output_node_id ? [tpl.primary_output_node_id] : [];
+      const regeneration = workflowRegenerationSnapshot(
+        wf.capturedGraph, settings.comfyuiUrl, outputNodeIds);
+      if (r.prompt_id) pollResult(r.prompt_id, outputNodeIds, regeneration);
     } catch (e) {
       pushBot(`启动失败：${(e as Error).message}`);
     }
@@ -469,18 +542,22 @@ export function useChatSession(deps: ChatSessionDeps) {
         if (action === "skip") continue;  // 本会话已处理过，不重复
         resumedRef.current.add(p.prompt_id);
         if (action === "expire") { removePending(p.prompt_id); continue; }
+        const outputNodeIds = p.outputNodeIds || [];  // 主输出过滤（提交时随 pending 落盘）
         try {
-          const r = await getResult(p.prompt_id, settings.comfyuiUrl);
+            const comfyuiUrl = p.regeneration?.kind === "workflow"
+              ? p.regeneration.comfyuiUrl
+              : settings.comfyuiUrl;
+            const r = await getResult(p.prompt_id, comfyuiUrl, outputNodeIds);
           if (!alive) return;
           if (r.status === "completed") {
             await finalizeGeneration(r, p.prompt_id);
             removePending(p.prompt_id);
             dispatch({ t: "workflowDone", promptId: p.prompt_id });  // 补清工作流态，否则切回后卡在"运转中"
           } else {
-            pollResult(p.prompt_id);  // 仍在跑，重新挂轮询
+            pollResult(p.prompt_id, outputNodeIds, p.regeneration);  // 仍在跑，重新挂轮询
           }
         } catch {
-          pollResult(p.prompt_id);    // 查询失败按仍在跑处理，继续轮询
+          pollResult(p.prompt_id, outputNodeIds, p.regeneration);    // 查询失败按仍在跑处理，继续轮询
         }
       }
     };
@@ -601,7 +678,10 @@ export function useChatSession(deps: ChatSessionDeps) {
       id: crypto.randomUUID(),
       role: "user",
       text: t,
-      parts: content?.parts,
+      parts: content?.parts || (images.length > 0 ? [
+        ...(t ? [{ type: "text" as const, text: t }] : []),
+        ...images.map((url) => ({ type: "image" as const, url })),
+      ] : undefined),
     };
     const botId = crypto.randomUUID();
     setMessages((m) => [
@@ -614,15 +694,27 @@ export function useChatSession(deps: ChatSessionDeps) {
       setMessages((ms) =>
         ms.map((m) => (m.id === botId ? { ...m, text: m.text + delta } : m)),
       );
-    const onImage = (shown: string, id?: string) => {
+    const onImage = (shown: string, id?: string, regeneration?: RegenerationSnapshot) => {
       const ownsCurrentRun = abortRef.current?.botId === botId;
       dispatch({ t: "agentImage", botId });
-      setMessages((messages) => upsertMessages(messages, [agentImageMessage(shown, id)]));
-      if (ownsCurrentRun && repo?.id) setCover(repo.id, shown);
+      setMessages((messages) => upsertMessages(
+        messages, [agentImageMessage(shown, id, regeneration)]));
+      if (ownsCurrentRun && repo?.id) setGeneratedCover(repo.id, shown);
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    };
+    const onVideo = (shown: string, id?: string) => {
+      dispatch({ t: "agentImage", botId });  // 复用「已产出内容」态：打断需二次确认
+      setMessages((messages) => upsertMessages(messages, [agentVideoMessage(shown, id)]));
       window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
     };
     const onInspiration = (card: { id?: string; query: string; prompt: string; tags: string[]; sources: { title: string; url: string }[] }) => {
       setMessages((messages) => upsertMessages(messages, [inspirationMessage(card)]));
+    };
+    const onApproval = (approval: PromptApproval) => {
+      setMessages((messages) => applyPromptApproval(messages, approval));
+    };
+    const onRouteChoice = (choice: RouteChoice) => {
+      setMessages((messages) => applyRouteChoice(messages, choice));
     };
     const onDone = (err?: string) => {
       dispatch({ t: "agentDone", botId });
@@ -632,6 +724,7 @@ export function useChatSession(deps: ChatSessionDeps) {
           ms.map((m) => (m.id === botId ? { ...m, text: m.text || `对话失败：${err}` } : m)),
         );
       }
+      startAgentRecovery();
     };
     // 多 Agent（Supervisor 编排）：trace（主管分派→专家执行）作为过程行 append 进 bot 文本，其余回调复用。
     // 单 agent 对外入口已下线，其大脑降级为多 Agent 的 tool_agent 专家节点（承接 MCP/工具串联）。
@@ -640,14 +733,162 @@ export function useChatSession(deps: ChatSessionDeps) {
       {
         onTrace: (line) => append(`${line}\n`),
         onDelta: append,
-        onImage, onInspiration, onDone,
+        onImage, onVideo, onInspiration, onApproval, onRouteChoice, onDone,
       },
       { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel,
         proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", messageId: botId,
-        styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "" },
+        userMessageId: userMsg.id,
+        styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "",
+        contextMaxTokens: settings.contextMaxTokens,
+        imageQuality,
+        video: videoModel },
     );
     abortRef.current = { botId, abort };
   };
+
+  const actOnPromptApproval = (
+    approval: PromptApproval,
+    action: "submit" | "change" | "cancel",
+    editedPrompt?: string,
+  ): Promise<void> => new Promise((resolve) => {
+    const botId = crypto.randomUUID();
+    const actionText = action === "submit" ? "确认提交" : action === "change" ? "更改提示词" : "取消";
+    setMessages((messages) => [
+      ...messages,
+      { id: botId, role: "assistant", text: "" },
+    ]);
+    dispatch({ t: "agentStart", botId });
+    const append = (delta: string) => setMessages((messages) =>
+      messages.map((message) => message.id === botId
+        ? { ...message, text: message.text + delta }
+        : message),
+    );
+    const onApproval = (updated: PromptApproval) => {
+      setMessages((messages) => applyPromptApproval(messages, updated));
+    };
+    const onImage = (url: string, id?: string, regeneration?: RegenerationSnapshot) => {
+      dispatch({ t: "agentImage", botId });
+      setMessages((messages) => upsertMessages(
+        messages, [agentImageMessage(url, id, regeneration)]));
+      if (repo?.id) setGeneratedCover(repo.id, url);
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    };
+    const onVideo = (url: string, id?: string) => {
+      dispatch({ t: "agentImage", botId });
+      setMessages((messages) => upsertMessages(messages, [agentVideoMessage(url, id)]));
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    };
+    const onDone = (err?: string) => {
+      dispatch({ t: "agentDone", botId });
+      if (abortRef.current?.botId === botId) abortRef.current = null;
+      if (err) append(`操作失败：${err}`);
+      startAgentRecovery();
+      resolve();
+    };
+    const abort = multiAgent(
+      threadId, actionText, [], chat, genModel, size,
+      {
+        onTrace: (line) => append(`${line}\n`),
+        onDelta: append,
+        onImage,
+        onVideo,
+        onApproval,
+        onDone,
+      },
+      {
+        outputDir: settings.outputDir,
+        repoId: repo?.id || threadId,
+        embed: settings.embedModel,
+        proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "",
+        messageId: botId,
+        styleTemplate: activeStyleTemplate(settings),
+        agentId: settings.activeAgentId || "",
+        contextMaxTokens: settings.contextMaxTokens,
+        imageQuality,
+        video: videoModel,
+      },
+      { approvalId: approval.id, action, editedPrompt },
+    );
+    abortRef.current = { botId, abort };
+  });
+
+  const actOnRouteChoice = (
+    choice: RouteChoice,
+    route: AgentRoute,
+  ): Promise<void> => new Promise((resolve) => {
+    const source = messages.find((message) => message.id === choice.userMessageId);
+    if (!source) {
+      pushBot("原始消息已不存在，无法继续执行这次选择。请重新发送需求。");
+      resolve();
+      return;
+    }
+    const sourceImages = (source.parts || [])
+      .filter((part) => part.type === "image" && part.url)
+      .map((part) => part.url!);
+    const selected: RouteChoice = { ...choice, status: "selected", selectedRoute: route };
+    setMessages((current) => applyRouteChoice(current, selected));
+
+    const botId = crypto.randomUUID();
+    setMessages((current) => [...current, { id: botId, role: "assistant", text: "" }]);
+    dispatch({ t: "agentStart", botId });
+    const append = (delta: string) => setMessages((current) => current.map((message) =>
+      message.id === botId ? { ...message, text: message.text + delta } : message,
+    ));
+    const onImage = (url: string, id?: string, regeneration?: RegenerationSnapshot) => {
+      dispatch({ t: "agentImage", botId });
+      setMessages((current) => upsertMessages(
+        current, [agentImageMessage(url, id, regeneration)]));
+      if (repo?.id) setGeneratedCover(repo.id, url);
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    };
+    const onVideo = (url: string, id?: string) => {
+      dispatch({ t: "agentImage", botId });
+      setMessages((current) => upsertMessages(current, [agentVideoMessage(url, id)]));
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    };
+    const onApproval = (approval: PromptApproval) => {
+      setMessages((current) => applyPromptApproval(current, approval));
+    };
+    const onDone = (err?: string) => {
+      dispatch({ t: "agentDone", botId });
+      if (abortRef.current?.botId === botId) abortRef.current = null;
+      if (err) {
+        append(`操作失败：${err}`);
+        setMessages((current) => applyRouteChoice(current, {
+          ...choice, status: "pending", selectedRoute: undefined,
+        }));
+      }
+      startAgentRecovery();
+      resolve();
+    };
+    const abort = multiAgent(
+      threadId, source.text, sourceImages, chat, genModel, size,
+      {
+        onTrace: (line) => append(`${line}\n`),
+        onDelta: append,
+        onImage,
+        onVideo,
+        onApproval,
+        onDone,
+      },
+      {
+        outputDir: settings.outputDir,
+        repoId: repo?.id || threadId,
+        embed: settings.embedModel,
+        proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "",
+        messageId: botId,
+        userMessageId: source.id,
+        styleTemplate: activeStyleTemplate(settings),
+        agentId: settings.activeAgentId || "",
+        contextMaxTokens: settings.contextMaxTokens,
+        imageQuality,
+        video: videoModel,
+      },
+      undefined,
+      { route, userMessageId: source.id },
+    );
+    abortRef.current = { botId, abort };
+  });
 
   // 工作流输入口编排（见 lib/workflowOrchestration）：依赖 runFreeText，故声明其后。
   const { findWorkflowCardByName, planWorkflowOps, applyWorkflowOps, ignoreWorkflowOps } =
@@ -697,6 +938,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     const sid = streamingId;
     const pid = runningPromptId(gen);
     dispatch({ t: "stop" });  // 一次性转 idle
+    stopProgress();
     await hardCancel(pid);
     if (sid) {
       setMessages((ms) =>
@@ -730,6 +972,56 @@ export function useChatSession(deps: ChatSessionDeps) {
     dispatchSend(item.content);  // 同 thread 新一轮：AI 带上下文续写 = 合并
   };
 
+  const regenerateResult = async (messageId: string) => {
+    const message = messages.find((item) => item.id === messageId);
+    const snapshot = message?.regeneration;
+    if (!snapshot) {
+      pushBot("这张历史图片生成时尚未保存完整参数，无法保证准确重生成。");
+      return;
+    }
+    if (streamingId || wfRunning || regeneratingIds.size > 0) {
+      pushBot("当前已有生成任务，请等待完成后再重新生图。");
+      return;
+    }
+    setRegeneratingIds((current) => new Set(current).add(messageId));
+    try {
+      if (snapshot.kind === "ai-image") {
+        const model = resolveImageRegenerationModel(snapshot, settings.imageModels);
+        if (!model) {
+          throw new Error(
+            `原生图模型已不存在：${snapshot.model.modelName}（${snapshot.model.baseUrl}）`,
+          );
+        }
+        const rec = await replayImageGeneration(snapshot, { apiKey: model.apiKey }, {
+          threadId,
+          repoId: repo?.id || "home",
+          outputDir: settings.outputDir,
+          embed: settings.embedModel,
+        });
+        setMessages((current) => upsertMessages(current, [
+          agentImageMessage(rec.url, rec.id, rec.regeneration || snapshot),
+        ]));
+        if (repo?.id) setGeneratedCover(repo.id, rec.url);
+        window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+        return;
+      }
+
+      const status = await comfyStatus(snapshot.comfyuiUrl);
+      if (!status.running) throw new Error(`原 ComfyUI 地址未运行：${snapshot.comfyuiUrl}`);
+      const submitted = await submitGraph(snapshot.graph, snapshot.comfyuiUrl);
+      if (!submitted.prompt_id) throw new Error("ComfyUI 未返回 prompt_id");
+      pollResult(submitted.prompt_id, snapshot.outputNodeIds, snapshot);
+    } catch (error) {
+      pushBot(`重新生图失败：${(error as Error).message}`);
+    } finally {
+      setRegeneratingIds((current) => {
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    }
+  };
+
   // 首页(home)临时草稿区手动清空：清当前显示 + 模块级 homeDraft。仅首页有意义（右上角按钮触发）。
   const clearHome = () => {
     homeDraft = [];
@@ -737,12 +1029,14 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
 
   return {
-    messages, streamingId, wfRunning, queued,
+    messages, streamingId, wfRunning, wfProgress, queued, regeneratingIds,
     send, runCommand, pushBot, pushMsg,
-    pickTemplate, updateCardDraft, markCardDone, markCardReopen,
+    actOnPromptApproval, actOnRouteChoice, regenerateResult,
+    pickTemplate, runWorkflow, updateCardDraft, markCardDone, markCardReopen,
     applyWorkflowOps, ignoreWorkflowOps,
     stopGenerating, guideQueued, cancelQueued,
     confirmReq, compact, compacting,
+    contextReminder, dismissContextReminder,
     clearHome, clearCache: clearCacheAction,
   };
 }

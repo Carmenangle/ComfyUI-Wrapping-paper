@@ -13,9 +13,25 @@ export function fullUrl(comfyUrl: string): string {
   return `${comfyUrl.replace(/\/$/, "")}/?laf_full=1`;
 }
 
-// 向子帧发送一条 laf_lock 消息（统一 target 信封）。
-export function postToFrame(win: Window | null | undefined, type: string, payload?: unknown): void {
-  win?.postMessage({ target: "laf_lock", type, payload }, "*");
+// 从 ComfyUI URL 推算 origin（用于 postMessage targetOrigin 和 ev.origin 校验）。
+// ComfyUI 始终是本机 http，所以不需要 https 考虑。
+// 返回 null 表示 URL 无效，调用方应退化为 "*"（仅在解析失败时）。
+export function frameOrigin(comfyUrl: string | null | undefined): string | null {
+  if (!comfyUrl) return null;
+  try {
+    const { origin } = new URL(comfyUrl.replace(/\/$/, ""));
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+}
+
+// 向子帧发送一条 laf_lock 消息。
+// comfyUrl 非空时用其 origin 作 targetOrigin，否则退化为 "*"。
+export function postToFrame(win: Window | null | undefined, type: string, payload?: unknown, comfyUrl?: string): void {
+  if (!win) return;
+  const target = comfyUrl ? (frameOrigin(comfyUrl) ?? "*") : "*";
+  win.postMessage({ target: "laf_lock", type, payload }, target);
 }
 
 // 是否是来自 laf_lock 子帧的消息；给 type 则同时校验类型。
@@ -30,4 +46,21 @@ export function isLafMessageFrom(
   type?: string,
 ): boolean {
   return !!frameWindow && event.source === frameWindow && isLafMessage(event.data, type);
+}
+
+// origin 感知版：同时校验 ev.origin，防止其他页面伪造消息。
+// comfyUrl 非空时严格校验 origin；为空则只校验 source 与 data（宽松模式，保持向后兼容）。
+export function isLafMessageFromStrict(
+  event: MessageEvent,
+  frameWindow: Window | null | undefined,
+  comfyUrl: string | null | undefined,
+  type?: string,
+): boolean {
+  if (!frameWindow || event.source !== frameWindow) return false;
+  if (!isLafMessage(event.data, type)) return false;
+  if (comfyUrl) {
+    const expected = frameOrigin(comfyUrl);
+    if (expected && event.origin !== expected) return false;
+  }
+  return true;
 }

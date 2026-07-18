@@ -10,6 +10,8 @@ from urllib.request import Request, urlopen
 
 import requests
 
+from app.services.url_guard import validate_comfyui_url
+
 
 class ComfyError(Exception):
     """ComfyUI 通信/校验错误。detail 供路由透出，status 建议 HTTP 码。"""
@@ -21,17 +23,24 @@ class ComfyError(Exception):
 
 
 def _base(url: str) -> str:
-    return url.rstrip("/")
+    try:
+        return validate_comfyui_url(url).rstrip("/")
+    except ValueError as e:
+        raise ComfyError(str(e), 400)
 
 
 def is_up(url: str, timeout: float = 1.5) -> bool:
     """探测 ComfyUI 是否在响应；HTTP 失败则退化为 TCP 端口探测。"""
     try:
-        with urlopen(url, timeout=timeout) as r:
+        normalized = validate_comfyui_url(url)
+    except ValueError:
+        return False
+    try:
+        with urlopen(normalized, timeout=timeout) as r:
             return r.status < 500
     except Exception:
         try:
-            p = urlparse(url)
+            p = urlparse(normalized)
             host = p.hostname or "127.0.0.1"
             port = p.port or 8188
             with socket.create_connection((host, port), timeout=timeout):
@@ -53,10 +62,15 @@ def fetch_object_info(url: str, node: str = "", timeout: float = 15) -> dict:
         raise ComfyError(str(e), 502)
 
 
-def submit_prompt(url: str, api: dict) -> str | None:
-    """POST /prompt，返回 prompt_id。HTTPError 透出 ComfyUI 校验详情。"""
-    body = json.dumps({"prompt": api}).encode("utf-8")
-    rq = Request(_base(url) + "/prompt", data=body, headers={"Content-Type": "application/json"})
+def submit_prompt(url: str, api: dict, client_id: str = "") -> str | None:
+    """POST /prompt，返回 prompt_id。HTTPError 透出 ComfyUI 校验详情。
+    client_id 非空时随请求带上，ComfyUI 会把该任务进度只推给同 clientId 的 WebSocket。"""
+    payload: dict[str, object] = {"prompt": api}
+    if client_id:
+        payload["client_id"] = client_id
+    body = json.dumps(payload).encode("utf-8")
+    rq = Request(_base(url) + "/prompt", data=body,
+                 headers={"Content-Type": "application/json"})
     try:
         with urlopen(rq, timeout=10) as r:
             res = json.loads(r.read())
@@ -71,8 +85,14 @@ def submit_prompt(url: str, api: dict) -> str | None:
         raise ComfyError(str(e), 500)
 
 
-def fetch_result(url: str, prompt_id: str) -> dict:
-    """轮询 /history/{id}，归一为 {status, images, texts}。"""
+def fetch_result(url: str, prompt_id: str,
+                 filter_node_ids: list[str] | None = None) -> dict:
+    """轮询 /history/{id}，归一为 {status, images, videos, texts}。
+
+    视频节点（VHS_VideoCombine 等）的产物落在 outputs 的 gifs 键（含 mp4/webm/gif），
+    与图片同结构({filename,subfolder,type})但单列 videos，供前端用 <video> 渲染。
+    filter_node_ids 非空时只保留指定节点的产物（多输出工作流主输出节点过滤）。
+    """
     try:
         with urlopen(_base(url) + f"/history/{prompt_id}", timeout=10) as r:
             hist = json.loads(r.read())
@@ -81,24 +101,41 @@ def fetch_result(url: str, prompt_id: str) -> dict:
 
     entry = hist.get(prompt_id)
     if not entry:
-        return {"status": "pending", "images": [], "texts": []}
+        return {"status": "pending", "images": [], "videos": [], "texts": []}
 
     completed = entry.get("status", {}).get("completed", False)
     images: list[dict[str, str]] = []
+    videos: list[dict[str, str]] = []
     texts: list[str] = []
-    for node_out in entry.get("outputs", {}).values():
+
+    def _as_ref(item: dict) -> dict[str, str]:
+        return {
+            "filename": item.get("filename", ""),
+            "subfolder": item.get("subfolder", ""),
+            "type": item.get("type", "output"),
+        }
+
+    _video_ext = (".mp4", ".webm", ".gif", ".mov", ".mkv", ".webp")
+    allowed = set(filter_node_ids) if filter_node_ids else None
+    for node_id, node_out in entry.get("outputs", {}).items():
+        if allowed and node_id not in allowed:
+            continue
         for img in node_out.get("images", []):
-            images.append({
-                "filename": img.get("filename", ""),
-                "subfolder": img.get("subfolder", ""),
-                "type": img.get("type", "output"),
-            })
+            # 个别视频节点把产物塞进 images，按扩展名甄别改归 videos
+            if str(img.get("filename", "")).lower().endswith(_video_ext[:-1]):
+                videos.append(_as_ref(img))
+            else:
+                images.append(_as_ref(img))
+        # gifs：VHS_VideoCombine 等的标准视频/动图输出键
+        for vid in node_out.get("gifs", []) or []:
+            videos.append(_as_ref(vid))
         for t in node_out.get("text", []) or []:
             if isinstance(t, str) and t.strip():
                 texts.append(t)
     return {
         "status": "completed" if completed else "running",
         "images": images,
+        "videos": videos,
         "texts": texts,
     }
 

@@ -107,7 +107,8 @@ export function SupportWidget({ chat, embed, repoId }: { chat: Model; embed: Mod
         onPointerMove={onFabPointerMove}
         onPointerUp={onFabPointerUp}
       >
-        <Headset size={24} />
+        <Headset className="support-fab-headset" size={24} />
+        <span className="support-fab-emblem" aria-hidden="true" />
       </button>
     );
   }

@@ -40,3 +40,12 @@ def test_save_returns_same_normalized_shape_as_get(tmp_path, monkeypatch):
     assert saved == loaded
     assert loaded["input_node_ids"] == ["1", "2"]
     assert loaded["output_node_ids"] == ["3"]
+
+
+def test_primary_output_node_id_normalized_and_persisted(tmp_path, monkeypatch):
+    monkeypatch.setattr(template_store, "TEMPLATES_DIR", tmp_path)
+    # 归一：数字/带空白转非空字符串；缺省为空串
+    assert template_store._normalize({"primary_output_node_id": 7})["primary_output_node_id"] == "7"
+    assert template_store._normalize({})["primary_output_node_id"] == ""
+    saved = template_store.save_template({"name": "x", "primary_output_node_id": " 9 "})
+    assert template_store.get_template(saved["id"])["primary_output_node_id"] == "9"

@@ -3,6 +3,7 @@ import { Boxes, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { type Repo } from "../../stores/repos";
 import { useSettings } from "../../stores/settings";
 import { Pager } from "../../components/Pager";
+import { PageShell } from "../../components/layout/PageShell";
 
 // 仓库封面：图片加载失败（本地文件被删/ComfyUI 离线/地址失效）时回退占位，不显示破图
 export function RepoCover({ src, name }: { src?: string; name: string }) {
@@ -86,31 +87,32 @@ export function ReposView({
   const curPage = Math.min(page, repoPageCount);
   const pagedRepos = shownRepos.slice((curPage - 1) * REPO_PAGE_SIZE, curPage * REPO_PAGE_SIZE);
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>{title}</h1>
+    <PageShell
+      title={title}
+      actions={
         <button className="btn" onClick={onNew}>
           <Plus size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />
           新建仓库
         </button>
-      </div>
-      {repos.length > 0 && (
-        <div style={{ position: "relative", marginBottom: 16, maxWidth: 320 }}>
+      }
+      toolbar={repos.length > 0 ? (
+        <div className="search-field">
           <Search size={14} style={{ position: "absolute", left: 9, top: 9, color: "var(--text-muted)" }} />
           <input style={{ width: "100%", paddingLeft: 28, boxSizing: "border-box" }} placeholder="搜索仓库名称…"
             value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
-      )}
+      ) : undefined}
+    >
       <RepoGrid
         repos={pagedRepos}
-        emptyText={kw ? `没有名称含「${q}」的仓库。` : "还没有仓库，点击右上角「新建仓库」创建一个。"}
+        emptyText={kw ? `没有名称含「${q}」的仓库。` : "还没有仓库，点击「新建仓库」创建一个。"}
         coverOf={coverOf}
         onOpen={onOpen}
         onRename={onRename}
         onDelete={onDelete}
       />
       <Pager page={curPage} pageCount={repoPageCount} onPage={setPage} />
-    </div>
+    </PageShell>
   );
 }
 
@@ -144,23 +146,19 @@ export function RepoDetailView({
   const subCur = Math.min(subPage, subPageCount);
   const shownChildren = matched.slice((subCur - 1) * SUB_PAGE_SIZE, subCur * SUB_PAGE_SIZE);
   return (
-    <div className="page">
-      <div className="page-head">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className="back-btn" onClick={onBack}>
-            ← 返回
-          </button>
-          <h1>{repo.name}</h1>
-        </div>
+    <PageShell
+      title={repo.name}
+      back={onBack}
+      actions={
         <button className="btn" onClick={onNewSub}>
           <Plus size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />
           新建小仓库
         </button>
-      </div>
-
+      }
+    >
       <h3 style={{ margin: "4px 0 12px", fontSize: 15 }}>小仓库（角色 / 画风等）</h3>
       {children.length > 0 && (
-        <div style={{ position: "relative", marginBottom: 12, maxWidth: 320 }}>
+        <div className="search-field" style={{ marginBottom: 12 }}>
           <Search size={14} style={{ position: "absolute", left: 9, top: 9, color: "var(--text-muted)" }} />
           <input style={{ width: "100%", paddingLeft: 28, boxSizing: "border-box" }} placeholder="搜索小仓库名称…"
             value={subQ} onChange={(e) => { setSubQ(e.target.value); setSubPage(1); }} />
@@ -168,14 +166,13 @@ export function RepoDetailView({
       )}
       <RepoGrid
         repos={shownChildren}
-        emptyText={kw ? `没有名称含「${subQ}」的小仓库。` : "还没有小仓库，点击右上角「新建小仓库」来存放角色、画风等内容。"}
+        emptyText={kw ? `没有名称含「${subQ}」的小仓库。` : "还没有小仓库，点击「新建小仓库」来存放角色、画风等内容。"}
         coverOf={coverOf}
         onOpen={onOpen}
         onRename={onRename}
         onDelete={onDelete}
       />
       <Pager page={subCur} pageCount={subPageCount} onPage={setSubPage} />
-    </div>
+    </PageShell>
   );
 }
-

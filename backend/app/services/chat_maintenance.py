@@ -50,6 +50,85 @@ def _revision(history: list[dict]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _message_images(message: dict) -> list[str]:
+    images: list[str] = []
+    direct = message.get("image")
+    if isinstance(direct, str) and direct:
+        images.append(direct)
+    for part in message.get("parts") or []:
+        if isinstance(part, dict) and part.get("type") == "image" and part.get("url"):
+            images.append(part["url"])
+    return list(dict.fromkeys(images))
+
+
+def _snapshot_history(snapshot: list[dict]) -> list[dict]:
+    """把完整渲染快照转换为压缩用的时间序列，覆盖普通消息与结构化卡片。"""
+    history: list[dict] = []
+    for message in snapshot:
+        if not isinstance(message, dict):
+            continue
+        fragments: list[str] = []
+        text = (message.get("text") or "").strip()
+        if text:
+            fragments.append(text)
+        elif message.get("parts"):
+            fragments.extend(
+                (part.get("text") or "").strip()
+                for part in message["parts"]
+                if isinstance(part, dict) and part.get("type") == "text"
+                and (part.get("text") or "").strip()
+            )
+        workflow = message.get("workflow") or {}
+        if workflow:
+            status = "已完成" if workflow.get("done") else "未完成"
+            fragments.append(f"[工作流卡] {workflow.get('templateName', '未命名')}（{status}）")
+        inspiration = message.get("inspiration") or {}
+        if inspiration:
+            fragments.append("[灵感卡] " + (inspiration.get("prompt") or inspiration.get("query") or ""))
+        ports_plan = message.get("portsPlan") or {}
+        if ports_plan:
+            fragments.append("[工作流编排] " + (ports_plan.get("summary") or ""))
+        approval = message.get("promptApproval") or {}
+        if approval:
+            fragments.append(
+                f"[提示词审批：{approval.get('status', '未知')}] "
+                + (approval.get("prompt") or approval.get("originalPrompt") or "")
+            )
+        images = _message_images(message)
+        content = "\n".join(fragment for fragment in fragments if fragment).strip()
+        if not content and images:
+            content = "（图片消息）"
+        if content or images:
+            history.append({
+                "role": "user" if message.get("role") == "user" else "assistant",
+                "content": content,
+                "images": images,
+            })
+    return history
+
+
+def _usable_image(url: str) -> bool:
+    if not url:
+        return False
+    path = rag_store._local_path_of(url)
+    return path is None or path.is_file()
+
+
+def _latest_result_image(snapshot: list[dict], generations: list[dict]) -> str:
+    for message in reversed(snapshot):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for url in reversed(_message_images(message)):
+            if _usable_image(url):
+                return url
+    ordered = sorted(generations, key=lambda item: int(item.get("created_at", 0) or 0), reverse=True)
+    for generation in ordered:
+        url = generation.get("image_url") or ""
+        if _usable_image(url):
+            return url
+    return ""
+
+
 def clear(thread_id: str) -> dict:
     with _lock(thread_id):
         _ensure_idle(thread_id)
@@ -100,13 +179,14 @@ def compact(thread_id: str, llm, embed_cfg: EmbedConfig) -> dict:
             old_snapshot = chat_snapshot.load_strict(thread_id)
         except Exception as exc:
             raise MaintenanceFailed(f"读取对话状态失败：{exc}") from exc
-        revision = _revision(history)
+        revision = _revision([history, old_snapshot])
 
     try:
         generations = rag_store.list_generations(thread_id, embed_cfg)
     except Exception as exc:
         raise MaintenanceFailed(f"读取生成记录失败：{exc}") from exc
-    result = chat_memory.summarize_history(history, llm, generations)
+    full_history = _snapshot_history(old_snapshot) or history
+    result = chat_memory.summarize_history(full_history, llm, generations)
     if not result.get("ok"):
         error = result.get("error")
         if error:
@@ -114,21 +194,24 @@ def compact(thread_id: str, llm, embed_cfg: EmbedConfig) -> dict:
         raise NothingToCompact("无可压缩内容或摘要为空")
 
     summary = result["summary"]
+    final_image = _latest_result_image(old_snapshot, generations)
     message = {
         "id": str(uuid.uuid4()),
         "role": "assistant",
         "text": "【历史摘要】\n" + summary,
+        **({"image": final_image} if final_image else {}),
     }
     checkpoint_summary = [{
         "role": "assistant",
         "content": "【历史摘要】\n" + summary,
-        "images": [],
+        "images": [final_image] if final_image else [],
     }]
 
     with lock:
         _ensure_idle(thread_id)
         current = chat_memory.get_history(thread_id)
-        if _revision(current) != revision:
+        current_snapshot = chat_snapshot.load_strict(thread_id)
+        if _revision([current, current_snapshot]) != revision:
             raise MaintenanceConflict("对话在压缩期间已更新，请重试")
         try:
             chat_snapshot.save(thread_id, [message])

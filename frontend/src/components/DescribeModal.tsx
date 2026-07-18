@@ -7,6 +7,7 @@ export interface DescribeValue {
   description: string;
   input_node_ids: string[];
   output_node_ids: string[];
+  primary_output_node_id?: string;  // 主输出节点（单选，可选）
 }
 
 interface Props {
@@ -28,10 +29,11 @@ export function DescribeModal({ workflowName, nodes, chat, initial, comfyUrl, so
   const [desc, setDesc] = useState(initial.description);
   const [inputIds, setInputIds] = useState<string[]>(initial.input_node_ids || []);
   const [outputIds, setOutputIds] = useState<string[]>(initial.output_node_ids || []);
+  const [primaryOutputId, setPrimaryOutputId] = useState<string>(initial.primary_output_node_id || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  // 当前正在用画布选哪一组："input" | "output" | null
-  const [picking, setPicking] = useState<"input" | "output" | null>(null);
+  // 当前正在用画布选哪一组："input" | "output" | "primary" | null
+  const [picking, setPicking] = useState<"input" | "output" | "primary" | null>(null);
   const canPick = !!(comfyUrl && sourcePath);
 
   // 切换某 id 在某组中的存在（多选累加/移除）
@@ -141,6 +143,39 @@ export function DescribeModal({ workflowName, nodes, chat, initial, comfyUrl, so
           </div>
         ))}
 
+        {/* 主输出节点：多输出工作流时指定哪个节点的产物作为默认结果 */}
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            主输出节点（可选，多输出工作流优先取此节点产物）
+          </label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0" }}>
+            {primaryOutputId ? (
+              <button className="btn" style={{ fontSize: 12 }}
+                title="点击清除" onClick={() => setPrimaryOutputId("")}>
+                {nameOf(primaryOutputId)} ✕
+              </button>
+            ) : (
+              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>（未设置，取所有输出节点产物）</span>
+            )}
+          </div>
+          {canPick ? (
+            <button className="btn" style={{ width: "100%" }} onClick={() => setPicking("primary")}>
+              {primaryOutputId ? "重新在画布选择" : "+ 在画布选择节点"}
+            </button>
+          ) : (
+            <select value={primaryOutputId}
+              onChange={(e) => setPrimaryOutputId(e.target.value)}
+              style={{ width: "100%" }}>
+              <option value="">（不设置，取所有产物）</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  #{n.id} {n.title || n.type}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
         {err && <p style={{ color: "#d9534f", fontSize: 13 }}>{err}</p>}
 
         <div className="modal-actions">
@@ -155,7 +190,12 @@ export function DescribeModal({ workflowName, nodes, chat, initial, comfyUrl, so
           </button>
           <button
             className="btn primary"
-            onClick={() => onConfirm({ description: desc.trim(), input_node_ids: inputIds, output_node_ids: outputIds })}
+            onClick={() => onConfirm({
+              description: desc.trim(),
+              input_node_ids: inputIds,
+              output_node_ids: outputIds,
+              primary_output_node_id: primaryOutputId || undefined,
+            })}
           >
             确定
           </button>
@@ -164,11 +204,15 @@ export function DescribeModal({ workflowName, nodes, chat, initial, comfyUrl, so
 
       {picking && canPick && (
         <NodePickerModal
-          title={picking === "input" ? "选择替换输入节点" : "选择替换输出节点"}
+          title={picking === "input" ? "选择替换输入节点" : picking === "primary" ? "选择主输出节点" : "选择替换输出节点"}
           comfyUrl={comfyUrl!}
           sourcePath={sourcePath!}
           onPick={(id) => {
-            toggle(picking, id);
+            if (picking === "primary") {
+              setPrimaryOutputId(id);
+            } else {
+              toggle(picking, id);
+            }
             setPicking(null);
           }}
           onCancel={() => setPicking(null)}

@@ -1,5 +1,6 @@
 import { apiGet, apiPost } from "./client";
 import { openSSE } from "./sse";
+import type { AiImageRegeneration, ChatMessage, RegenerationSnapshot } from "../types/chat";
 
 // 嵌入模型配置（设置 → 嵌入模型），单一属主。
 type Embed = { baseUrl: string; apiKey: string; modelName: string };
@@ -171,27 +172,6 @@ export function fetchInspiration(
   });
 }
 
-// 多轮对话流式调用：历史由后端按 threadId(=仓库id) 落盘载入，前端只传本轮输入。
-// images 为本轮随文附带的图片（dataURI/URL），非空时后端组多模态消息送 VLM。
-// 逐块回调增量文本，结束/出错回调收尾。返回中止函数。
-export function chatStream(
-  threadId: string,
-  message: string,
-  chat: { baseUrl: string; apiKey: string; modelName: string },
-  onDelta: (text: string) => void,
-  onDone: (err?: string) => void,
-  images: string[] = [],
-  embed?: { baseUrl: string; apiKey: string; modelName: string },
-): () => void {
-  return openSSE("/ai/chat", {
-    thread_id: threadId,
-    message,
-    images,
-    ...chatBody(chat),
-    ...sseEmbed(embed),
-  }, (obj) => { if (obj.delta) onDelta(String(obj.delta)); }, onDone);
-}
-
 // 单 agent 对外入口（imageAgentStream / POST /ai/image-agent）已下线：其大脑降级为多 Agent 的
 // tool_agent 专家节点（见后端 agent_graph.tool_agent_node）。自由文本一律走 multiAgent（Supervisor 编排）。
 // 注：/ai/image-agent/running 与 /ai/image-agent/cancel 仍保留——它们是后台化的共用机制，多 Agent 同用。
@@ -213,11 +193,16 @@ export function multiAgent(
   cbs: {
     onTrace: (line: string) => void;
     onDelta: (text: string) => void;
-    onImage: (url: string, id?: string) => void;
+    onImage: (url: string, id?: string, regeneration?: RegenerationSnapshot) => void;
+    onVideo?: (url: string, id?: string) => void;
     onInspiration?: (card: Inspiration & { id?: string }) => void;
+    onApproval?: (approval: import("../types/chat").PromptApproval) => void;
+    onRouteChoice?: (choice: import("../types/chat").RouteChoice) => void;
     onDone: (err?: string) => void;
   },
-  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; proxyUrl?: string; routeModel?: string; messageId?: string; styleTemplate?: string; agentId?: string },
+  persist?: { outputDir: string; repoId: string; embed: { baseUrl: string; apiKey: string; modelName: string }; proxyUrl?: string; routeModel?: string; messageId?: string; userMessageId?: string; styleTemplate?: string; agentId?: string; contextMaxTokens?: number; imageQuality?: import("../lib/viewRouting").ImageQuality; video?: { baseUrl: string; apiKey: string; modelName: string } },
+  approvalAction?: { approvalId: string; action: "submit" | "change" | "cancel"; editedPrompt?: string },
+  routeAction?: { route: import("../types/chat").AgentRoute; userMessageId: string },
 ): () => void {
   return openSSE("/ai/multi-agent", {
     thread_id: threadId,
@@ -227,7 +212,11 @@ export function multiAgent(
     gen_base_url: gen.baseUrl,
     gen_api_key: gen.apiKey,
     gen_model: gen.modelName,
+    video_base_url: persist?.video?.baseUrl || "",
+    video_api_key: persist?.video?.apiKey || "",
+    video_model: persist?.video?.modelName || "",
     size,
+    image_quality: persist?.imageQuality || "high",
     output_dir: persist?.outputDir || "",
     repo_id: persist?.repoId || "",
     ...sseEmbed(persist?.embed),
@@ -236,17 +225,57 @@ export function multiAgent(
     message_id: persist?.messageId || "",
     style_template: persist?.styleTemplate || "",
     agent_id: persist?.agentId || "",
+    context_max_tokens: persist?.contextMaxTokens || 20_000,
+    approval_id: approvalAction?.approvalId || "",
+    approval_action: approvalAction?.action || "",
+    edited_prompt: approvalAction?.editedPrompt || "",
+    forced_route: routeAction?.route || "",
+    user_message_id: routeAction?.userMessageId || persist?.userMessageId || "",
   }, (obj) => {
     if (obj.trace) cbs.onTrace(String(obj.trace));
     if (obj.delta) cbs.onDelta(String(obj.delta));
-    if (obj.image) cbs.onImage(String(obj.image), obj.id as string | undefined);
+    if (obj.image) cbs.onImage(
+      String(obj.image),
+      obj.id as string | undefined,
+      obj.regeneration as RegenerationSnapshot | undefined,
+    );
+    if (obj.video) cbs.onVideo?.(String(obj.video), obj.id as string | undefined);
     if (obj.insp) cbs.onInspiration?.(obj.insp as Inspiration & { id?: string });
+    if (obj.approval) cbs.onApproval?.(obj.approval as import("../types/chat").PromptApproval);
+    if (obj.route_choice) cbs.onRouteChoice?.(obj.route_choice as import("../types/chat").RouteChoice);
   }, cbs.onDone);
 }
 
-// 清空某仓库对话线
-export function clearHistory(threadId: string) {
-  return apiPost<{ ok: boolean }>("/ai/chat/clear", { thread_id: threadId });
+export function regenerateImage(
+  snapshot: AiImageRegeneration,
+  model: { apiKey: string },
+  persist: {
+    threadId: string;
+    repoId: string;
+    outputDir: string;
+    embed: { baseUrl: string; apiKey: string; modelName: string };
+  },
+) {
+  return apiPost<{
+    ok: boolean;
+    id: string;
+    url: string;
+    regeneration: AiImageRegeneration;
+  }>("/ai/regenerate-image", {
+    thread_id: persist.threadId,
+    repo_id: persist.repoId,
+    prompt: snapshot.prompt,
+    images: snapshot.images,
+    gen_base_url: snapshot.model.baseUrl,
+    gen_api_key: model.apiKey,
+    gen_model: snapshot.model.modelName,
+    size: snapshot.size,
+    image_quality: snapshot.quality,
+    output_dir: persist.outputDir,
+    embed_base_url: persist.embed.baseUrl,
+    embed_api_key: persist.embed.apiKey,
+    embed_model: persist.embed.modelName,
+  }, 960000);
 }
 
 // 清除缓存：清对话线+前端快照+删本仓库 reference/ 上传参考图。资产库与知识库不动。返回删了几张参考图。
@@ -257,32 +286,21 @@ export function clearCache(threadId: string, outputDir: string) {
   );
 }
 
-// 压缩对话上下文：AI 把历史+生成记录总结成一条摘要，清空对话线与快照，只留摘要。
-// 知识库/资产不动，图与提示词保留。返回摘要消息（含 id），前端用它替换整个消息流。
+// 压缩完整会话：旧消息替换为摘要文本和最后成果图；知识库与资产库不动。
 export function compactHistory(
   threadId: string,
   chat: { baseUrl: string; apiKey: string; modelName: string },
   embed: { baseUrl: string; apiKey: string; modelName: string },
 ) {
-  return apiPost<{ ok: boolean; summary: string; image_count: number; message: { id: string; role: string; text: string } }>(
+  return apiPost<{
+    ok: boolean;
+    summary: string;
+    image_count: number;
+    message: Pick<ChatMessage, "id" | "role" | "text"> & Partial<Pick<ChatMessage, "image">>;
+  }>(
     "/ai/chat/compact",
     { thread_id: threadId, ...chatBody(chat), ...sseEmbed(embed) },
   );
-}
-
-// 把已生成的有价值消息（提示词/图片）落盘，刷新后保留。不调模型。
-export function appendMessage(
-  threadId: string,
-  role: "user" | "assistant",
-  text: string,
-  images: string[] = [],
-) {
-  return apiPost<{ ok: boolean }>("/ai/chat/append", {
-    thread_id: threadId,
-    role,
-    text,
-    images,
-  });
 }
 
 // 落盘前端完整消息流快照（含工作流卡/反推卡等非对话消息），作为可靠真源。
@@ -370,50 +388,50 @@ export interface BuildResult {
 // currentGraph 非空=在当前画布基础上增量改；save=false 只回图不落盘（多轮迭代中途）
 export function buildWorkflow(args: {
   need: string; chat: ChatCfg; embed: Embed; comfyUrl: string; workflowDir: string; name?: string;
-  currentGraph?: Record<string, unknown>; save?: boolean; proxy?: string;
+  currentGraph?: Record<string, unknown>; save?: boolean; proxy?: string; signal?: AbortSignal;
 }) {
   return apiPost<BuildResult>("/ai/build", {
     base_url: args.chat.baseUrl, api_key: args.chat.apiKey, model: args.chat.modelName, proxy: args.proxy || "",
     ...sseEmbed(args.embed),
     need: args.need, comfy_url: args.comfyUrl, workflow_dir: args.workflowDir, name: args.name || "",
     current_graph: args.currentGraph || {}, save: args.save !== false,
-  }, 240000);  // 4 分钟超时，防前端永久“思考中…”
+  }, 240000, args.signal);  // 4 分钟超时，防前端永久“思考中…”
 }
 
 // 分模块增量搭建：冻结当前图，AI 只出新模块+锚点，后端合并进整图。返回合并后完整图，前端写回画布。
 export function buildModule(args: {
   need: string; chat: ChatCfg; embed: Embed; comfyUrl: string;
-  currentGraph: Record<string, unknown>; proxy?: string;
+  currentGraph: Record<string, unknown>; proxy?: string; signal?: AbortSignal;
 }) {
   return apiPost<BuildResult>("/ai/build/module", {
     base_url: args.chat.baseUrl, api_key: args.chat.apiKey, model: args.chat.modelName, proxy: args.proxy || "",
     ...sseEmbed(args.embed),
     need: args.need, comfy_url: args.comfyUrl, current_graph: args.currentGraph,
-  }, 240000);  // 4 分钟超时
+  }, 240000, args.signal);  // 4 分钟超时
 }
 
 // 精简直连：信任强模型(Opus)一次到位，只调 1 次模型，不 audit 自修/不重写/不回喂重试。最快。
 export function buildDirect(args: {
   need: string; chat: ChatCfg; embed: Embed; comfyUrl: string;
-  currentGraph?: Record<string, unknown>; proxy?: string;
+  currentGraph?: Record<string, unknown>; proxy?: string; signal?: AbortSignal;
 }) {
   return apiPost<BuildResult>("/ai/build/direct", {
     base_url: args.chat.baseUrl, api_key: args.chat.apiKey, model: args.chat.modelName, proxy: args.proxy || "",
     ...sseEmbed(args.embed),
     need: args.need, comfy_url: args.comfyUrl, current_graph: args.currentGraph || {},
-  }, 180000);  // 单次调用，3 分钟足够
+  }, 180000, args.signal);  // 单次调用，3 分钟足够
 }
 
 // 顾问模式：只产出给人看的中文方案文本，不改画布。用户确认后再走 build/module 执行。
 export function buildPlan(args: {
   need: string; chat: ChatCfg; embed: Embed; comfyUrl: string;
-  currentGraph?: Record<string, unknown>; proxy?: string;
+  currentGraph?: Record<string, unknown>; proxy?: string; signal?: AbortSignal;
 }) {
   return apiPost<{ plan: string }>("/ai/build/plan", {
     base_url: args.chat.baseUrl, api_key: args.chat.apiKey, model: args.chat.modelName, proxy: args.proxy || "",
     ...sseEmbed(args.embed),
     need: args.need, comfy_url: args.comfyUrl, current_graph: args.currentGraph || {},
-  }, 180000);  // 3 分钟超时（只出方案，较快）
+  }, 180000, args.signal);  // 3 分钟超时（只出方案，较快）
 }
 
 // 把前端手改后的画布 graph 直接落盘（不经 AI）

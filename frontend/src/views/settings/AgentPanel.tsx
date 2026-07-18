@@ -3,9 +3,12 @@ import { Plus, Trash2, Save, AlertTriangle } from "lucide-react";
 import { listAgents, saveAgents, defaultPrompt, DEFAULT_TOOLS, type Agent, type AgentTools } from "../../api/agents";
 import { listMcpServers, type McpServer } from "../../api/mcp";
 import { listSkills, type Skill } from "../../api/skills";
+import type { PanelProps } from "./GeneralPanel";
+import { normalizeContextBudgets } from "../../stores/settings";
 
 const TOOL_LABELS: { key: keyof AgentTools; label: string }[] = [
   { key: "generate_image", label: "文生图" },
+  { key: "generate_video", label: "文生视频" },
   { key: "image_to_image", label: "图生图" },
   { key: "analyze_image", label: "反推提示词" },
   { key: "search_inspiration", label: "联网找灵感" },
@@ -13,7 +16,7 @@ const TOOL_LABELS: { key: keyof AgentTools; label: string }[] = [
 
 // 多 Agent 预设管理：列表 + 编辑（人设/记忆/请求参数/工具开关）。
 // 独立于 settings 草稿（存后端 data/agents.json），点保存整体写回。
-export function AgentPanel() {
+export function AgentPanel({ draft, setDraft }: PanelProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,7 +34,7 @@ export function AgentPanel() {
     listSkills().then((s) => setSkillList(s.filter((x) => x.enabled))).catch(() => {});
   }, []);
 
-  // 新建 Agent 默认带内置生图规则（开箱即能生图，与原行为一致），用户改了才不同
+  // 新建 Agent 默认带普通对话优先、显式意图才调用工具的内置规则
   const add = () =>
     setAgents((s) => [...s, {
       id: crypto.randomUUID(),
@@ -71,21 +74,66 @@ export function AgentPanel() {
 
   return (
     <div className="settings-section">
+      <div className="settings-subsection">
+        <h4>全局上下文预算</h4>
+        <div className="field-row">
+          <div className="field">
+            <label>提醒压缩 tokens</label>
+            <input
+              type="number"
+              min={1000}
+              max={draft.contextMaxTokens - 1000}
+              step={1000}
+              value={draft.contextReminderTokens}
+              onChange={(e) => {
+                const budgets = normalizeContextBudgets(Number(e.target.value), draft.contextMaxTokens);
+                setDraft((current) => ({
+                  ...current,
+                  contextReminderTokens: budgets.reminder,
+                  contextMaxTokens: budgets.max,
+                }));
+              }}
+            />
+          </div>
+          <div className="field">
+            <label>历史上下文上限 tokens</label>
+            <input
+              type="number"
+              min={4000}
+              max={200000}
+              step={1000}
+              value={draft.contextMaxTokens}
+              onChange={(e) => {
+                const budgets = normalizeContextBudgets(draft.contextReminderTokens, Number(e.target.value));
+                setDraft((current) => ({
+                  ...current,
+                  contextReminderTokens: budgets.reminder,
+                  contextMaxTokens: budgets.max,
+                }));
+              }}
+            />
+          </div>
+        </div>
+        <p className="field-hint">
+          token 数为跨模型估算值。提醒值必须低于上限；上限只约束历史消息，本轮输入、系统提示和模型输出另行占用上下文。
+          修改后使用页面底部的“保存”生效。
+        </p>
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h4 style={{ margin: 0 }}>智能体（Agent）</h4>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={add}><Plus size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />新建</button>
           <button className="btn primary" onClick={save} disabled={saving}>
-            <Save size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />{saving ? "保存中…" : "保存"}
+            <Save size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />{saving ? "保存中…" : "保存智能体"}
           </button>
         </div>
       </div>
       <p className="field-hint" style={{ marginTop: 8 }}>
-        创建多个智能体预设，对话时在左下角切换。新建的智能体默认带内置生图规则（开箱即能生图），你可自由修改提示词打造不同用途的智能体。改动需点「保存」。
+        创建多个智能体预设，对话时在左下角切换。新建智能体默认进行普通对话，仅在明确执行意图下调用图片、视频或外部工具。改动需点「保存」。
         {saved && <span className="settings-saved" style={{ marginLeft: 8 }}>已保存</span>}
       </p>
       <div style={{ marginTop: 12 }}>
-        {agents.length === 0 && <p className="field-hint">还没有自定义智能体（当前对话用内置默认行为）。点「新建」创建一个（默认带生图规则，可改）。</p>}
+        {agents.length === 0 && <p className="field-hint">还没有自定义智能体（当前对话用内置默认行为）。点「新建」创建一个。</p>}
         {agents.map((a) => (
           <div className="image-model-card" key={a.id}>
             <div className="row-head">
@@ -106,7 +154,7 @@ export function AgentPanel() {
               />
               <p className="field-hint" style={{ marginTop: 4 }}>
                 <AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />
-                提示词含生图工具调用规则，大幅改动可能影响生图。想做纯问答等用途可自由重写。
+                系统提示词包含工具调用边界；大幅改动可能导致工具误调用。
               </p>
             </div>
             <div className="field">

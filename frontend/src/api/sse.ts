@@ -5,7 +5,7 @@
 // wire 格式（与后端 sse_response 对齐）：每个事件一行 `data: <json>\n\n`，
 // 收尾一行 `data: [DONE]`。事件对象含 {delta} / {image,image_id} / {inspiration} / {error} 等。
 
-const API_BASE = "http://127.0.0.1:8010/api";
+import { apiUrl } from "./client";
 
 // 打开一条 SSE 流：POST body 到 path，逐事件回调 onEvent。
 // onEvent 返回 "stop" 可提前结束（如收到 error 后不再继续）。
@@ -19,7 +19,7 @@ export function openSSE(
   const ctrl = new AbortController();
   (async () => {
     try {
-      const resp = await fetch(`${API_BASE}${path}`, {
+      const resp = await fetch(apiUrl(path), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -13,23 +13,30 @@ interface ConfirmProps {
   message?: string;
   confirmText?: string;
   danger?: boolean;
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function ConfirmModal({ title, message, confirmText = "确认", danger, onConfirm, onCancel }: ConfirmProps) {
-  useEsc(onCancel);
+export function ConfirmModal({
+  title, message, confirmText = "确认", danger, busy = false, onConfirm, onCancel,
+}: ConfirmProps) {
+  useEsc(() => { if (!busy) onCancel(); });
   return (
-    <div className="modal-mask" onClick={onCancel}>
+    <div className="modal-mask" onClick={() => !busy && onCancel()}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         {message && <p style={{ color: "#666", marginTop: 0 }}>{message}</p>}
         <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>
+          <button className="btn" disabled={busy} onClick={onCancel}>
             取消
           </button>
-          <button className={`btn ${danger ? "danger" : "primary"}`} onClick={onConfirm}>
-            {confirmText}
+          <button
+            className={`btn ${danger ? "danger" : "primary"}`}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? "处理中…" : confirmText}
           </button>
         </div>
       </div>

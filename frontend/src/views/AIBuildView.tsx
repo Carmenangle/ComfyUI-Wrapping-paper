@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, RefreshCw, Save, Eraser, LayoutTemplate, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { Sparkles, RefreshCw, Save, Eraser, LayoutTemplate, FolderOpen, Plus, Trash2, Undo2, Redo2 } from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { ConfirmModal } from "../components/Modal";
 import { useSettings, activeChatModel } from "../stores/settings";
@@ -8,7 +8,7 @@ import {
   listSkeletons, skeletonGraph, type Skeleton,
   listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta,
 } from "../api/ai";
-import { fullUrl, postToFrame, isLafMessageFrom } from "../lib/lafLock";
+import { fullUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { useBuildSession } from "../lib/useBuildSession";
 
 // 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
@@ -41,6 +41,54 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const frameRef = useRef<HTMLIFrameElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const buildSession = useBuildSession();
+  const abortRef = useRef<AbortController | null>(null);   // 正在跑的搭建请求，供“停止”按钮中止
+
+  // 版本历史：每次成功写画布/载入底座都压一版，可撤销/重做（graph 存在前端，撤销即重载回画布）
+  type GraphVer = { graph: Record<string, unknown>; label: string; at: number };
+  const [versions, setVersions] = useState<GraphVer[]>([]);
+  const [verIdx, setVerIdxState] = useState(-1);   // 当前生效版本下标，-1=无
+  const verIdxRef = useRef(-1);   // 同步镜像，避免连续 pushVersion 读到过期下标
+  const setVerIdx = (n: number) => { verIdxRef.current = n; setVerIdxState(n); };
+  const VER_CAP = 20;
+
+  // 停止当前长请求：中止 fetch，apiPost 会抛“已停止”，由各 catch 收尾
+  const stopBuild = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  };
+
+  // 压入一个新版本：截掉当前之后的重做分支，超上限从头淘汰
+  const pushVersion = (graph: Record<string, unknown>, label: string) => {
+    if (!graph || !Object.keys(graph).length) return;
+    setVersions((prev) => {
+      const kept = prev.slice(0, verIdxRef.current + 1);
+      const next = [...kept, { graph, label, at: Date.now() }];
+      const trimmed = next.length > VER_CAP ? next.slice(next.length - VER_CAP) : next;
+      setVerIdx(trimmed.length - 1);
+      return trimmed;
+    });
+  };
+
+  // 重置版本栈（新建/恢复/载入底座时用；base 非空则作为第 0 版）
+  const resetVersions = (base?: Record<string, unknown>, label = "初始画布") => {
+    if (base && Object.keys(base).length) {
+      setVersions([{ graph: base, label, at: Date.now() }]);
+      setVerIdx(0);
+    } else {
+      setVersions([]);
+      setVerIdx(-1);
+    }
+  };
+
+  // 跳到某版本：重载回画布
+  const gotoVersion = (idx: number) => {
+    if (idx < 0 || idx >= versions.length) return;
+    postToFrame(frameRef.current?.contentWindow, "load", { workflow: versions[idx].graph }, settings.comfyuiUrl);
+    setVerIdx(idx);
+    setNote(`已切到版本 ${idx + 1}/${versions.length}：${versions[idx].label}`);
+  };
+  const undoVersion = () => gotoVersion(verIdx - 1);
+  const redoVersion = () => gotoVersion(verIdx + 1);
 
   const src = fullUrl(settings.comfyuiUrl);
   const canSend = input.trim().length > 0 && !busy && !!chat.modelName && ready;
@@ -48,11 +96,11 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   // 收子帧 ready（画布可用）
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
-      if (isLafMessageFrom(ev, frameRef.current?.contentWindow, "ready")) setReady(true);
+      if (isLafMessageFromStrict(ev, frameRef.current?.contentWindow, settings.comfyuiUrl, "ready")) setReady(true);
     };
     window.addEventListener("message", onMsg);
     // 补一次 ping，防错过首帧 ready
-    const t = setTimeout(() => postToFrame(frameRef.current?.contentWindow, "ping_ready"), 1500);
+    const t = setTimeout(() => postToFrame(frameRef.current?.contentWindow, "ping_ready", undefined, settings.comfyuiUrl), 1500);
     return () => { window.removeEventListener("message", onMsg); clearTimeout(t); };
   }, []);
 
@@ -83,7 +131,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     setNote("");
     try {
       const r = await skeletonGraph(s.id, settings.workflowDir);
-      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
+      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph }, settings.comfyuiUrl);
+      resetVersions(r.graph, `骨架「${s.name}」`);
       skeletonIdRef.current = s.id;
       // 选了骨架底座 → 默认切增量模式（在此底座上增量加模块，而非精简直连推倒重搭）
       setDirect(false);
@@ -116,7 +165,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
         buildSession.startNew();
         setSessionId("");
         localStorage.removeItem(LAST_KEY);
-        postToFrame(frameRef.current?.contentWindow, "load", { workflow: graph });
+        postToFrame(frameRef.current?.contentWindow, "load", { workflow: graph }, settings.comfyuiUrl);
+        resetVersions(graph, "带入的工作流");
         push("assistant", "已把工作流写入右侧画布，你可以直接手动调整，或继续告诉我要改什么。");
         setTimeout(() => saveProgress(true), 800);  // load 后自动存成新会话
         return;
@@ -159,7 +209,10 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       setMsgs((s.msgs as Msg[]) || []);
       localStorage.setItem(LAST_KEY, s.id);
       if (s.graph && Object.keys(s.graph).length) {
-        postToFrame(frameRef.current?.contentWindow, "load", { workflow: s.graph });
+        postToFrame(frameRef.current?.contentWindow, "load", { workflow: s.graph }, settings.comfyuiUrl);
+        resetVersions(s.graph, "恢复的会话");
+      } else {
+        resetVersions();
       }
       setShowSessions(false);
       setNote(`已恢复会话「${s.name}」`);
@@ -176,8 +229,9 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     setSessionName("未命名工作流");
     skeletonIdRef.current = "";
     setMsgs([]);
+    resetVersions();
     localStorage.removeItem(LAST_KEY);
-    postToFrame(frameRef.current?.contentWindow, "clear_graph");
+    postToFrame(frameRef.current?.contentWindow, "clear_graph", undefined, settings.comfyuiUrl);
     setShowSessions(false);
     setNote("已新建空白会话");
   };
@@ -202,13 +256,13 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       if (!win) return resolve(null);
       let done = false;
       const onMsg = (ev: MessageEvent) => {
-        if (!isLafMessageFrom(ev, win, expect)) return;
+        if (!isLafMessageFromStrict(ev, win, settings.comfyuiUrl, expect)) return;
         done = true;
         window.removeEventListener("message", onMsg);
         resolve(ev.data.payload as T);
       };
       window.addEventListener("message", onMsg);
-      postToFrame(win, type);
+      postToFrame(win, type, undefined, settings.comfyuiUrl);
       setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve(null); } }, ms);
     });
 
@@ -226,43 +280,57 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     push("user", need);
     setBusy(true);
     setNote("");
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       if (advisor) {
         // 顾问模式：先出人话方案，不改画布；「同意执行」时让搭建**照这段方案**来（原需求+方案一起）
         const current = await readGraph();
-        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current });
+        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, signal: ac.signal });
         const planNeed = `${need}\n\n【已和用户确认的搭建方案，请严格照此搭建】\n${r.plan}`;
         setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: r.plan, pendingNeed: planNeed, planText: r.plan }]);
       } else {
-        await doExecute(need);
+        await doExecute(need, ac.signal);
       }
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
     } finally {
       setBusy(false);
+      abortRef.current = null;
     }
   };
 
   // 真正生成并写入画布（直接模式直接调；顾问模式由「同意执行」按钮调）
-  const doExecute = async (need: string) => {
+  // signal 为空时自建一个 AbortController 并登记，让“停止”按钮也能中止这些内部入口
+  const doExecute = async (need: string, signal?: AbortSignal) => {
+    let sig = signal;
+    if (!sig) {
+      const ac = new AbortController();
+      abortRef.current = ac;
+      sig = ac.signal;
+    }
     const current = await readGraph();               // 带上当前画布作上下文
     const hasNodes = Object.keys(current).length > 0;
     // 精简直连(默认)：只调1次模型，信任Opus一次到位，最快不超时——优先走它。
     // 否则按增量/整图老路（多层校验自修，慢但对弱模型稳）。
     // 不传 proxy 给对话模型：与仓库对话同路径（默认 httpx 读系统环境），强行代理反而切断中转连接
     const r = direct
-      ? await buildDirect({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: hasNodes ? current : undefined })
+      ? await buildDirect({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: hasNodes ? current : undefined, signal: sig })
       : incremental && hasNodes
-      ? await buildModule({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current })
+      ? await buildModule({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, signal: sig })
       : await buildWorkflow({
           need, chat, embed: settings.embedModel,
           comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir,
           currentGraph: current, save: false,  // 迭代中途不落盘，只回图写画布
+          signal: sig,
         });
     const miss = r.missing_nodes && r.missing_nodes.length ? r.missing_nodes : undefined;
     const alts = r.alternatives && Object.keys(r.alternatives).length ? r.alternatives : undefined;
     if (r.ok && r.graph && Object.keys(r.graph).length) {
-      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph });
+      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph }, settings.comfyuiUrl);
+      // 版本历史：栈空且改前画布非空，先把改前状态压成基版，撤销可回到它
+      if (versions.length === 0 && hasNodes) pushVersion(current, "改前画布");
+      pushVersion(r.graph, need.slice(0, 20) || "AI 生成");
       const warn = r.warnings && r.warnings.length
         ? "\n提示（不影响写入，可继续调整）：\n" + r.warnings.join("\n")
         : "";
@@ -295,6 +363,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       push("assistant", "请求失败：" + (e as Error).message);
     } finally {
       setBusy(false);
+      abortRef.current = null;
     }
   };
 
@@ -309,6 +378,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       push("assistant", "请求失败：" + (e as Error).message);
     } finally {
       setBusy(false);
+      abortRef.current = null;
     }
   };
 
@@ -323,7 +393,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   };
 
   const doClear = () => {
-    postToFrame(frameRef.current?.contentWindow, "clear_graph");
+    postToFrame(frameRef.current?.contentWindow, "clear_graph", undefined, settings.comfyuiUrl);
+    resetVersions();
     setNote("已清空画布");
   };
 
@@ -374,6 +445,19 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
           <button className="btn" onClick={doSync}>
             <RefreshCw size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />同步节点库
           </button>
+          <button className="btn" onClick={undoVersion} disabled={!ready || verIdx <= 0}
+            title={verIdx > 0 ? `撤销到上一版：${versions[verIdx - 1]?.label ?? ""}` : "没有可撤销的版本"}>
+            <Undo2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />撤销
+          </button>
+          <button className="btn" onClick={redoVersion} disabled={!ready || verIdx < 0 || verIdx >= versions.length - 1}
+            title={verIdx < versions.length - 1 ? `重做到下一版：${versions[verIdx + 1]?.label ?? ""}` : "没有可重做的版本"}>
+            <Redo2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />重做
+          </button>
+          {versions.length > 0 && (
+            <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>
+              版本 {verIdx + 1}/{versions.length}
+            </span>
+          )}
           <button className="btn" onClick={doClear} disabled={!ready} title="清空右侧画布，从空白重新搭建">
             <Eraser size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />清空画布
           </button>
@@ -490,7 +574,13 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
             {busy && (
               <div className="ai-build-msg assistant">
                 <div className="avatar"><Sparkles size={14} /></div>
-                <div className="bubble">思考中…</div>
+                <div className="bubble" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>思考中…</span>
+                  <button className="btn" style={{ padding: "2px 10px", fontSize: 12 }}
+                    title="停止本次搭建请求" onClick={stopBuild}>
+                    停止
+                  </button>
+                </div>
               </div>
             )}
           </div>

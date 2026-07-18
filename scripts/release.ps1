@@ -70,8 +70,14 @@ if ($Publish) {
   Write-Host ""
   Write-Host "== 发布 GitHub Release ($Version) =="
   # Release 已存在(同名 tag 重发)→ 只覆盖上传 zip(--clobber)；否则新建 Release(gh 会自动建同名 tag 指向当前 HEAD)
+  # gh release view 对"不存在"会往 stderr 打字并返回非0；Stop 模式下 stderr 会被升级成终止错误，
+  # 故临时把 ErrorActionPreference 调回 Continue，只看退出码判断是否存在。
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   & gh release view $Version *>$null
-  if ($LASTEXITCODE -eq 0) {
+  $releaseExists = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = $prevEAP
+  if ($releaseExists) {
     Write-Host "Release $Version 已存在，覆盖上传 zip..."
     & gh release upload $Version $zipPath --clobber
     if ($LASTEXITCODE -ne 0) { throw "上传 zip 到已有 Release 失败" }

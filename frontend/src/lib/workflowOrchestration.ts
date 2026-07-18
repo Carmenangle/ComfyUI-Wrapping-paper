@@ -4,7 +4,7 @@ import { uploadImage } from "../api/comfyui";
 import type { RichContent } from "../components/RichInput";
 import type { ChatMessage } from "../types/chat";
 import { fmtOpResults } from "./opResults";
-import { isLafMessage } from "./lafLock";
+import { isLafMessageFromStrict, postToFrame } from "./lafLock";
 
 type Chat = { baseUrl: string; apiKey: string; modelName: string };
 
@@ -53,15 +53,13 @@ export function useWorkflowOrchestration(deps: OrchestrationDeps) {
       if (!frame?.contentWindow) return resolve(null);
       let done = false;
       const onMsg = (ev: MessageEvent) => {
-        const d = ev.data;
-        if (!isLafMessage(d, expectType)) return;
-        if (ev.source !== frame.contentWindow) return;
+        if (!isLafMessageFromStrict(ev, frame.contentWindow, comfyuiUrl, expectType)) return;
         done = true;
         window.removeEventListener("message", onMsg);
-        resolve(d.payload as T);
+        resolve(ev.data.payload as T);
       };
       window.addEventListener("message", onMsg);
-      frame.contentWindow.postMessage({ target: "laf_lock", ...send }, "*");
+      postToFrame(frame.contentWindow, (send as any).type, (send as any).payload, comfyuiUrl);
       setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve(null); } }, ms);
     });
 

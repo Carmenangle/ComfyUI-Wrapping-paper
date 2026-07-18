@@ -85,6 +85,7 @@ class TemplateRequest(BaseModel):
     image_node_id: str = ""      # 图像输入口节点 id（旧字段，保留兼容）
     input_node_ids: list[str] = []   # 替换输入节点列表（左侧接线/自身 widget）
     output_node_ids: list[str] = []  # 替换输出节点列表(右侧接线)
+    primary_output_node_id: str = "" # 主输出节点（多输出时优先取用此节点产物）
 
 
 @router.get("/templates")
@@ -126,6 +127,7 @@ def get_template_raw(template_id: str) -> dict:
         "image_node_id": tpl.get("image_node_id", ""),
         "input_node_ids": input_ids,
         "output_node_ids": output_ids,
+        "primary_output_node_id": tpl.get("primary_output_node_id", ""),
     }
 
 

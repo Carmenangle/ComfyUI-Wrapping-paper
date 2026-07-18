@@ -188,6 +188,7 @@ export function useWorkflowTemplates(settings: Settings) {
       description: d.description,
       input_node_ids: d.input_node_ids,
       output_node_ids: d.output_node_ids,
+      primary_output_node_id: d.primary_output_node_id || "",
     });
     refreshTemplates();
   };

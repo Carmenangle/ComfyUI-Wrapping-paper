@@ -44,10 +44,21 @@ def _from_src(src: str) -> tuple[bytes, str]:
         ext = "png"
         if "image/" in header:
             ext = header.split("image/")[1].split(";")[0] or "png"
+        elif "video/" in header:
+            ext = header.split("video/")[1].split(";")[0] or "mp4"
         return data, ext
+    # 校验外部 URL 防 SSRF；本应用 local-view 代理地址豁免（已在后端可信路径落盘）
+    from app.services.url_guard import is_local_view_url, validate_media_url
+    if not is_local_view_url(src):
+        try:
+            validate_media_url(src)
+        except ValueError as e:
+            raise ComfyError(str(e), 400)
     try:
-        with urlopen(src, timeout=60) as r:
-            data = r.read()
+        with urlopen(src, timeout=30) as r:
+            data = r.read(20 * 1024 * 1024)  # 最大 20 MB，防超大文件撑爆内存
+    except ComfyError:
+        raise
     except Exception as e:
         raise ComfyError(f"下载图片失败：{e}", 502)
     tail = Path(src.split("?")[0]).name

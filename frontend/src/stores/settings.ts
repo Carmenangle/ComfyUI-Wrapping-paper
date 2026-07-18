@@ -2,10 +2,21 @@ import { useEffect, useState } from "react";
 import { getUserState } from "../api/userState";
 import { pushSettings } from "../lib/userStateSync";
 
-export type Theme = "light" | "dark" | "system";
+export type ManualTheme = "bright" | "night" | "eye-care" | "green" | "gray" | "high-contrast";
+export type Theme = ManualTheme | "system";
+
+const MANUAL_THEMES: readonly ManualTheme[] = [
+  "bright",
+  "night",
+  "eye-care",
+  "green",
+  "gray",
+  "high-contrast",
+];
 
 export interface ChatModel {
   id?: string;        // 多模型列表里的唯一 id（单模型旧数据可无）
+  displayName?: string;
   apiKey: string;
   baseUrl: string;
   modelName: string;
@@ -20,6 +31,16 @@ export interface EmbedModel {
 
 export interface ImageModel {
   id: string;
+  displayName?: string;
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  supportsCustomSize?: boolean;
+}
+
+export interface VideoModel {
+  id: string;
+  displayName?: string;
   apiKey: string;
   baseUrl: string;
   modelName: string;
@@ -40,6 +61,8 @@ export interface Settings {
   embedModel: EmbedModel;  // 知识库 RAG 嵌入模型
   imageModels: ImageModel[];
   activeImageModelId?: string;
+  videoModels: VideoModel[];
+  activeVideoModelId?: string;
   imageStyle?: string;  // 生图提示词风格：""(自动)/sd/gpt/banana，或 "preset:<id>" 指向自定义存档
   stylePresets?: StylePreset[];  // 用户自定义风格存档
   workflowDir: string; // 工作流默认读取路径（后端扫描该目录及子目录的 .json）
@@ -59,6 +82,23 @@ export interface Settings {
   chatBgPosX?: number; // 水平位置 0~100（默认 50 居中）
   chatBgPosY?: number; // 垂直位置 0~100（默认 50 居中）
   activeAgentId?: string; // 当前对话选中的 Agent 预设 id（空=内置默认行为）
+  contextReminderTokens: number; // 累计上下文达到该估算 token 数时提醒压缩
+  contextMaxTokens: number; // 每轮传给 Agent 的历史上下文估算 token 硬上限
+}
+
+export const DEFAULT_CONTEXT_REMINDER_TOKENS = 12_000;
+export const DEFAULT_CONTEXT_MAX_TOKENS = 20_000;
+
+export function normalizeContextBudgets(reminder: unknown, max: unknown) {
+  const parsedMax = Number(max);
+  const safeMax = Number.isFinite(parsedMax)
+    ? Math.min(200_000, Math.max(4_000, Math.round(parsedMax)))
+    : DEFAULT_CONTEXT_MAX_TOKENS;
+  const parsedReminder = Number(reminder);
+  const safeReminder = Number.isFinite(parsedReminder)
+    ? Math.min(safeMax - 1_000, Math.max(1_000, Math.round(parsedReminder)))
+    : Math.min(DEFAULT_CONTEXT_REMINDER_TOKENS, safeMax - 1_000);
+  return { reminder: safeReminder, max: safeMax };
 }
 
 const KEY = "laf_settings";
@@ -68,6 +108,7 @@ const DEFAULT: Settings = {
   chatModels: [],
   embedModel: { apiKey: "ollama", baseUrl: "http://localhost:11434/v1", modelName: "qwen3-embedding:latest" },
   imageModels: [],
+  videoModels: [],
   imageStyle: "",
   stylePresets: [],
   workflowDir: "",
@@ -86,11 +127,20 @@ const DEFAULT: Settings = {
   chatBgScale: 1,
   chatBgPosX: 50,
   chatBgPosY: 50,
+  contextReminderTokens: DEFAULT_CONTEXT_REMINDER_TOKENS,
+  contextMaxTokens: DEFAULT_CONTEXT_MAX_TOKENS,
 };
 
 // 旧数据迁移：单 chatModel 字段 → chatModels 列表（向后兼容）
 function migrate(s: Record<string, unknown>): Settings {
   const merged = { ...DEFAULT, ...s } as Settings & { chatModel?: ChatModel };
+  merged.theme = normalizeTheme(s.theme);
+  const contextBudgets = normalizeContextBudgets(
+    s.contextReminderTokens,
+    s.contextMaxTokens,
+  );
+  merged.contextReminderTokens = contextBudgets.reminder;
+  merged.contextMaxTokens = contextBudgets.max;
   if ((!merged.chatModels || merged.chatModels.length === 0) && merged.chatModel) {
     const old = merged.chatModel;
     if (old.baseUrl || old.modelName || old.apiKey) {
@@ -105,6 +155,14 @@ function migrate(s: Record<string, unknown>): Settings {
   );
   delete merged.chatModel;
   return merged;
+}
+
+export function normalizeTheme(value: unknown): Theme {
+  // 旧白天主题就是现在的米黄护眼方案；旧暗色归入夜间方案。
+  if (value === "light") return "eye-care";
+  if (value === "dark") return "night";
+  if (value === "system" || MANUAL_THEMES.includes(value as ManualTheme)) return value as Theme;
+  return DEFAULT.theme;
 }
 
 function load(): Settings {
@@ -124,10 +182,18 @@ export function activeChatModel(s: Settings): ChatModel {
   );
 }
 
-export function applyTheme(theme: Theme) {  const dark =
-    theme === "dark" ||
-    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+export function modelDisplayName(model: { displayName?: string; modelName: string }): string {
+  return model.displayName?.trim() || model.modelName.trim() || "未命名模型";
+}
+
+export function resolveTheme(theme: Theme, prefersDark: boolean): ManualTheme {
+  if (theme !== "system") return theme;
+  return prefersDark ? "night" : "bright";
+}
+
+export function applyTheme(theme: Theme) {
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = resolveTheme(theme, prefersDark);
 }
 
 export function useSettings() {

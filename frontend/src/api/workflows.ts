@@ -61,6 +61,7 @@ export interface Template {
   image_node_id?: string;
   input_node_ids: string[];
   output_node_ids: string[];
+  primary_output_node_id?: string;  // 主输出节点（多输出时优先取用）
   created_at: number;
   updated_at: number;
 }
@@ -75,6 +76,7 @@ export interface TemplatePayload {
   image_node_id?: string;
   input_node_ids?: string[];
   output_node_ids?: string[];
+  primary_output_node_id?: string;
 }
 
 export function listTemplates() {
@@ -89,6 +91,7 @@ export interface TemplateRaw {
   image_node_id?: string;
   input_node_ids?: string[];
   output_node_ids?: string[];
+  primary_output_node_id?: string;
 }
 
 // 取模板原始工作流 + 暴露节点 id（供锁定画布载入）

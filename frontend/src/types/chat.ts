@@ -7,6 +7,50 @@ export interface MsgPart {
   url?: string;   // type=image（dataURI 或 http URL）
 }
 
+export interface PromptApproval {
+  id: string;
+  messageId: string;
+  kind: "image" | "video" | "img2img";
+  originalPrompt: string;
+  prompt: string;
+  status: "pending" | "submitted" | "cancelled" | "failed";
+  stage?: "prompt_review" | "rewrite_consent" | "delivery_unknown" | "request_failed";
+  reason?: string;
+}
+
+export type AgentRoute = "answer" | "generate" | "img2img" | "analyze" | "video" | "inspire" | "tool_agent";
+
+export interface RouteChoice {
+  id: string;
+  messageId: string;
+  userMessageId: string;
+  status: "pending" | "selected";
+  selectedRoute?: AgentRoute;
+  options: { route: AgentRoute; label: string }[];
+}
+
+export interface AiImageRegeneration {
+  kind: "ai-image";
+  prompt: string;
+  images: string[];
+  size: string;
+  quality: "auto" | "low" | "medium" | "high";
+  model: {
+    baseUrl: string;
+    modelName: string;
+  };
+}
+
+export interface WorkflowRegeneration {
+  kind: "workflow";
+  graph: unknown;
+  comfyuiUrl: string;
+  outputNodeIds: string[];
+  prompt: string;
+}
+
+export type RegenerationSnapshot = AiImageRegeneration | WorkflowRegeneration;
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -14,6 +58,8 @@ export interface ChatMessage {
   parts?: MsgPart[];   // 图文混排：有则优先按顺序渲染，文本/图片穿插
   thinking?: string;
   image?: string;
+  video?: string;   // 生成的视频地址（mp4/webm/gif，用 <video> 渲染）
+  regeneration?: RegenerationSnapshot; // 绑定该结果的不可变重生成参数，不含 API Key
   // 工作流节点卡：选中模板后把所选节点逐个提取，各自嵌入锁定的真实 ComfyUI 画布，纵向排列
   workflow?: {
     templateId: string;
@@ -37,4 +83,8 @@ export interface ChatMessage {
     tags: string[];
     sources: { title: string; url: string }[];
   };
+  // 风格模板/艺术化修饰后的独立提示词审批卡，可在历史中继续操作。
+  promptApproval?: PromptApproval;
+  // Supervisor 无法高置信分派时显示的最小候选选择卡。
+  routeChoice?: RouteChoice;
 }

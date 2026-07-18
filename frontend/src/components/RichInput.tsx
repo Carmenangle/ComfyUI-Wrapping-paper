@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Plus, X } from "lucide-react";
+import { clampSelectionScroll } from "../lib/contextManagement";
 
 // 序列化结果：图片在上、文本在下两层。parts 保留兼容（图片在前、文本在后）。
 export interface RichContent {
@@ -24,6 +25,7 @@ export interface RichInputHandle {
 
 interface Props {
   templateNames: string[];
+  height?: number;
   placeholder?: string;
   onSubmit: (content: RichContent) => void;
   onTextChange?: (text: string) => void;  // 文本变化（供外部感知，可选）
@@ -36,6 +38,12 @@ interface CmdCandidate {
   hint?: string;
 }
 
+// 是否是视频地址（mp4/webm/mov/mkv）：这些用 <video> 渲染，gif/webp 仍当图片。
+function isVideoUrl(url: string): boolean {
+  const path = url.split(/[?#]/)[0].toLowerCase();
+  return /\.(mp4|webm|mov|mkv)$/.test(path);
+}
+
 // 当前光标所在文本的「活动段」：按 " + " 分隔取最后一段，解析 /cmd arg
 function parseActiveSeg(text: string): { cmd: string; arg: string } | null {
   const idx = text.lastIndexOf(" + ");
@@ -45,7 +53,7 @@ function parseActiveSeg(text: string): { cmd: string; arg: string } | null {
 }
 
 export const RichInput = forwardRef<RichInputHandle, Props>(
-  ({ templateNames, placeholder, onSubmit, onTextChange, onCanSubmitChange }, ref) => {
+  ({ templateNames, height, placeholder, onSubmit, onTextChange, onCanSubmitChange }, ref) => {
     const taRef = useRef<HTMLTextAreaElement | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);  // 上方 + 按钮的隐藏 file input
     const [images, setImages] = useState<string[]>([]);     // 图片栏：dataURI/URL，左到右
@@ -54,6 +62,45 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
     const [curText, setCurText] = useState("");  // 当前纯文本（驱动补全）
     const [preview, setPreview] = useState<string | null>(null);  // 悬停放大预览
     const [dragIdx, setDragIdx] = useState<number | null>(null);  // 拖拽中的图片索引（排序）
+    const selectingRef = useRef(false);
+    const selectionScrollRef = useRef({ top: 0, time: 0 });
+    const correctingScrollRef = useRef(false);
+
+    useEffect(() => {
+      const stopSelecting = () => { selectingRef.current = false; };
+      window.addEventListener("pointerup", stopSelecting);
+      window.addEventListener("pointercancel", stopSelecting);
+      window.addEventListener("blur", stopSelecting);
+      return () => {
+        window.removeEventListener("pointerup", stopSelecting);
+        window.removeEventListener("pointercancel", stopSelecting);
+        window.removeEventListener("blur", stopSelecting);
+      };
+    }, []);
+
+    const onSelectionStart = (e: React.PointerEvent<HTMLTextAreaElement>) => {
+      if (e.button !== 0) return;
+      selectingRef.current = true;
+      selectionScrollRef.current = { top: e.currentTarget.scrollTop, time: performance.now() };
+    };
+
+    const onSelectionScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+      const textarea = e.currentTarget;
+      if (!selectingRef.current) return;
+      if (correctingScrollRef.current) {
+        correctingScrollRef.current = false;
+        selectionScrollRef.current = { top: textarea.scrollTop, time: performance.now() };
+        return;
+      }
+      const now = performance.now();
+      const previous = selectionScrollRef.current;
+      const next = clampSelectionScroll(previous.top, textarea.scrollTop, now - previous.time);
+      if (next !== textarea.scrollTop) {
+        correctingScrollRef.current = true;
+        textarea.scrollTop = next;
+      }
+      selectionScrollRef.current = { top: next, time: now };
+    };
 
     // 拖拽重排：把 dragIdx 处的图移动到 toIdx 前
     const reorder = (from: number, to: number) => {
@@ -195,13 +242,13 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
         const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
         if (m && m[1]) { e.preventDefault(); addImage(m[1]); return; }
       }
-      // 图片直链/本应用图片地址/dataURI → 作为图片加入
-      const looksLikeImageUrl =
-        /^https?:\/\/\S+\.(png|jpe?g|gif|webp|bmp)(\?\S*)?$/i.test(text) ||
-        /\.(png|jpe?g|gif|webp|bmp)(\b|\?|&|=)/i.test(text) ||
+      // 图片/视频直链、本应用媒体地址、dataURI → 作为媒体加入（视频以 <video> 渲染）
+      const looksLikeMediaUrl =
+        /^https?:\/\/\S+\.(png|jpe?g|gif|webp|bmp|mp4|webm|mov|mkv)(\?\S*)?$/i.test(text) ||
+        /\.(png|jpe?g|gif|webp|bmp|mp4|webm|mov|mkv)(\b|\?|&|=)/i.test(text) ||
         /\/comfyui\/(local-)?view\b/i.test(text) ||
-        /^data:image\//i.test(text);
-      if (text && looksLikeImageUrl) {
+        /^data:(image|video)\//i.test(text);
+      if (text && looksLikeMediaUrl) {
         e.preventDefault();
         addImage(text);
         return;
@@ -258,7 +305,12 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
               onMouseLeave={() => setPreview(null)}
               title="拖动可排序"
             >
-              <img src={url} alt="图片" draggable={false} />
+              {/* 视频用 <video> 渲染，gif/图片用 <img>（避免 mp4 走 img 显示裂图） */}
+              {isVideoUrl(url) ? (
+                <video src={url} muted playsInline draggable={false} />
+              ) : (
+                <img src={url} alt="图片" draggable={false} />
+              )}
               <button
                 type="button"
                 className="rich-imgbar-del"
@@ -274,16 +326,21 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
         <textarea
           ref={taRef}
           className="rich-input"
-          rows={1}
+          rows={4}
+          style={height ? { height } : undefined}
           placeholder={placeholder}
           value={curText}
           onChange={(e) => onTextInput(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
+          onPointerDown={onSelectionStart}
+          onScroll={onSelectionScroll}
         />
         {/* 悬停放大预览：独立元素，不占布局。仅当图仍在栏内才显示，防删除后悬空卡住 */}
         {preview && images.includes(preview) && (
-          <img className="rich-chip-preview" src={preview} alt="预览" />
+          isVideoUrl(preview)
+            ? <video className="rich-chip-preview" src={preview} muted autoPlay loop playsInline />
+            : <img className="rich-chip-preview" src={preview} alt="预览" />
         )}
       </div>
     );

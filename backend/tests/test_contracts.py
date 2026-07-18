@@ -5,6 +5,7 @@
 """
 from app.services.rag_store import EmbedConfig
 from app.services import workflow_parser, workflow_convert
+from app.services.agent_contracts import RunContext
 
 
 def test_embed_config_默认模型():
@@ -25,3 +26,15 @@ def test_convert_额外并入PrimitiveNode是有意差异():
     assert "PrimitiveNode" not in workflow_parser.PASSTHROUGH_TYPES
     # convert 从 parser 导入的正是共享穿透集（同一来源，非各写一份）
     assert workflow_convert.PASSTHROUGH_TYPES is workflow_parser.PASSTHROUGH_TYPES
+
+
+def test_agent上下文token上限契约():
+    assert RunContext(thread_id="t", message="m").context_max_tokens == 20_000
+    custom = RunContext(thread_id="t", message="m", context_max_tokens=48_000)
+    assert custom["context_max_tokens"] == 48_000
+
+
+def test_agent生图质量契约():
+    assert RunContext(thread_id="t", message="m").image_quality == "high"
+    custom = RunContext(thread_id="t", message="m", image_quality="medium")
+    assert custom["image_quality"] == "medium"

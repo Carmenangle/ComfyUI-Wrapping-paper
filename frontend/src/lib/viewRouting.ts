@@ -28,17 +28,85 @@ export function buildHash(view: View, repoId: string | null): string {
   return "#/home";
 }
 
-// 比例 + 分辨率档 → 像素宽高。基准短边按档位取（1k=1024,2k=2048,4k=4096），长边按比例放大，
-// 都对齐到 8 的倍数（生图模型通常要求）。返回 "宽x高" 字符串。
-export const ASPECTS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "9:21"];
-export const RES_TIERS: Record<string, number> = { "1k": 1024, "2k": 2048, "4k": 4096 };
+// 比例 + 分辨率档 → 像素宽高。最长边按档位取（1k=1280,2k=2560,4k=3840），
+// 另一边按比例缩放并对齐到最接近的 4 的倍数。返回 "宽x高" 字符串。
+export const ASPECTS = ["21:9", "2:1", "16:9", "4:3", "1:1", "3:4", "9:16", "1:2", "9:21"];
+export const RES_TIERS: Record<string, number> = { "1k": 1280, "2k": 2560, "4k": 3840 };
+export const CUSTOM_SIZE_MIN = 64;
+export const CUSTOM_SIZE_MAX = 3840;
+export const IMAGE_QUALITIES = {
+  auto: "自动",
+  low: "低",
+  medium: "中",
+  high: "高",
+} as const;
+export type ImageQuality = keyof typeof IMAGE_QUALITIES;
+
+// 未知兼容接口默认不发送 quality。只对白名单 GPT Image 家族启用，避免 Banana/Gemini 拒绝未知字段。
+export function supportsImageQuality(modelName: string): boolean {
+  return modelName.trim().toLowerCase().includes("gpt-image");
+}
 
 export function calcSize(aspect: string, tier: string): string {
   const [aw, ah] = aspect.split(":").map(Number);
-  const base = RES_TIERS[tier] || 1024;
-  const round8 = (n: number) => Math.max(8, Math.round(n / 8) * 8);
+  const base = RES_TIERS[tier] || 1280;
+  const round4 = (n: number) => Math.max(4, Math.round(n / 4) * 4);
   let w: number, h: number;
-  if (aw >= ah) { h = base; w = base * (aw / ah); }  // 横向/方形：短边=高
-  else { w = base; h = base * (ah / aw); }            // 纵向：短边=宽
-  return `${round8(w)}x${round8(h)}`;
+  if (aw >= ah) { w = base; h = base * (ah / aw); }  // 横向/方形：最长边=宽
+  else { h = base; w = base * (aw / ah); }            // 纵向：最长边=高
+  return `${round4(w)}x${round4(h)}`;
+}
+
+export function normalizeCustomDimension(value: unknown, fallback = 1280): number {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(CUSTOM_SIZE_MAX, Math.max(CUSTOM_SIZE_MIN, parsed));
+}
+
+export interface ResolvedImageSize {
+  size: string;
+  mode: "preset" | "custom" | "fallback";
+  aspect: string;
+  resTier: string;
+}
+
+export function resolveImageSize(
+  aspect: string,
+  resTier: string,
+  customEnabled: boolean,
+  customWidth: number,
+  customHeight: number,
+  supportsCustomSize: boolean,
+): ResolvedImageSize {
+  if (!customEnabled) {
+    return { size: calcSize(aspect, resTier), mode: "preset", aspect, resTier };
+  }
+  const width = normalizeCustomDimension(customWidth);
+  const height = normalizeCustomDimension(customHeight);
+  if (supportsCustomSize) {
+    return { size: `${width}x${height}`, mode: "custom", aspect: `${width}:${height}`, resTier: "custom" };
+  }
+
+  const ratio = width / height;
+  const nearestAspect = ASPECTS.reduce((best, candidate) => {
+    const [bw, bh] = best.split(":").map(Number);
+    const [cw, ch] = candidate.split(":").map(Number);
+    return Math.abs(Math.log(ratio / (cw / ch))) < Math.abs(Math.log(ratio / (bw / bh)))
+      ? candidate
+      : best;
+  }, ASPECTS[0]);
+  const longest = Math.max(width, height);
+  const nearestTier = Object.entries(RES_TIERS).reduce((best, candidate) => {
+    const bestDistance = Math.abs(longest - best[1]);
+    const candidateDistance = Math.abs(longest - candidate[1]);
+    return candidateDistance < bestDistance || (candidateDistance === bestDistance && candidate[1] > best[1])
+      ? candidate
+      : best;
+  })[0];
+  return {
+    size: calcSize(nearestAspect, nearestTier),
+    mode: "fallback",
+    aspect: nearestAspect,
+    resTier: nearestTier,
+  };
 }

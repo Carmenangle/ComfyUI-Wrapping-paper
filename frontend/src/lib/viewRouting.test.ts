@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildHash, calcSize, ASPECTS, RES_TIERS } from "./viewRouting";
+import {
+  buildHash, calcSize, ASPECTS, IMAGE_QUALITIES, RES_TIERS, supportsImageQuality,
+  normalizeCustomDimension, resolveImageSize,
+} from "./viewRouting";
 
 describe("buildHash", () => {
   it("各视图映射到对应 hash", () => {
@@ -17,22 +20,68 @@ describe("buildHash", () => {
 });
 
 describe("calcSize", () => {
-  it("1:1 各档取基准短边", () => {
-    expect(calcSize("1:1", "1k")).toBe("1024x1024");
-    expect(calcSize("1:1", "2k")).toBe("2048x2048");
-    expect(calcSize("1:1", "4k")).toBe("4096x4096");
+  it("1:1 各档取基准长边", () => {
+    expect(calcSize("1:1", "1k")).toBe("1280x1280");
+    expect(calcSize("1:1", "2k")).toBe("2560x2560");
+    expect(calcSize("1:1", "4k")).toBe("3840x3840");
   });
-  it("横向：短边=高，长边按比例放大并对齐 8", () => {
-    expect(calcSize("16:9", "1k")).toBe("1824x1024"); // 1024*16/9=1820.4 → 对齐8=1824
+  it("横向：最长边按档位，另一边按比例并对齐 4", () => {
+    expect(calcSize("2:1", "1k")).toBe("1280x640");
+    expect(calcSize("2:1", "2k")).toBe("2560x1280");
+    expect(calcSize("2:1", "4k")).toBe("3840x1920");
+    expect(calcSize("16:9", "1k")).toBe("1280x720");
+    expect(calcSize("16:9", "2k")).toBe("2560x1440");
+    expect(calcSize("16:9", "4k")).toBe("3840x2160");
+    expect(calcSize("21:9", "4k")).toBe("3840x1644");
   });
-  it("纵向：短边=宽", () => {
-    expect(calcSize("9:16", "1k")).toBe("1024x1824");
+  it("纵向比例与标准表一致", () => {
+    expect(calcSize("1:2", "1k")).toBe("640x1280");
+    expect(calcSize("1:2", "2k")).toBe("1280x2560");
+    expect(calcSize("1:2", "4k")).toBe("1920x3840");
+    expect(calcSize("3:4", "1k")).toBe("960x1280");
+    expect(calcSize("3:4", "2k")).toBe("1920x2560");
+    expect(calcSize("3:4", "4k")).toBe("2880x3840");
+    expect(calcSize("9:16", "1k")).toBe("720x1280");
+    expect(calcSize("9:16", "2k")).toBe("1440x2560");
+    expect(calcSize("9:16", "4k")).toBe("2160x3840");
+    expect(calcSize("9:21", "1k")).toBe("548x1280");
+    expect(calcSize("9:21", "2k")).toBe("1096x2560");
+    expect(calcSize("9:21", "4k")).toBe("1644x3840");
   });
-  it("未知档位回退 1024", () => {
-    expect(calcSize("1:1", "9k")).toBe("1024x1024");
+  it("未知档位回退 1280", () => {
+    expect(calcSize("1:1", "9k")).toBe("1280x1280");
   });
   it("常量表齐全", () => {
     expect(ASPECTS).toContain("1:1");
+    expect(ASPECTS).toContain("1:2");
+    expect(ASPECTS).toContain("2:1");
     expect(Object.keys(RES_TIERS)).toEqual(["1k", "2k", "4k"]);
+    expect(Object.keys(IMAGE_QUALITIES)).toEqual(["auto", "low", "medium", "high"]);
+  });
+  it("仅已知 GPT Image 模型启用质量参数", () => {
+    expect(supportsImageQuality("gpt-image-2-4k")).toBe(true);
+    expect(supportsImageQuality("nano-banana-pro")).toBe(false);
+    expect(supportsImageQuality("gemini-3-pro-image-preview")).toBe(false);
+    expect(supportsImageQuality("unknown-image-model")).toBe(false);
+  });
+});
+
+describe("custom image size", () => {
+  it("passes an allowed custom size directly to capable providers", () => {
+    expect(resolveImageSize("1:1", "1k", true, 1536, 192, true)).toEqual({
+      size: "1536x192", mode: "custom", aspect: "1536:192", resTier: "custom",
+    });
+  });
+
+  it("maps custom dimensions to the nearest preset for unsupported providers", () => {
+    expect(resolveImageSize("1:1", "4k", true, 1920, 1080, false)).toEqual({
+      size: "2560x1440", mode: "fallback", aspect: "16:9", resTier: "2k",
+    });
+  });
+
+  it("enforces the custom dimension bounds", () => {
+    expect(normalizeCustomDimension(32)).toBe(64);
+    expect(normalizeCustomDimension(5000)).toBe(3840);
+    expect(normalizeCustomDimension("bad", 1024)).toBe(1024);
   });
 });

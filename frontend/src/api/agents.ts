@@ -2,6 +2,7 @@ import { apiGet, apiPost } from "./client";
 
 export interface AgentTools {
   generate_image: boolean;
+  generate_video: boolean;
   image_to_image: boolean;
   analyze_image: boolean;
   search_inspiration: boolean;
@@ -31,12 +32,12 @@ export function saveAgents(agents: Agent[]) {
   return apiPost<Agent[]>("/agents", agents);
 }
 
-// 内置默认系统提示词（含生图工具调用规则），供"默认 Agent"预填
+// 内置默认系统提示词（普通对话优先 + 显式工具调用规则）
 export function defaultPrompt() {
   return apiGet<{ prompt: string }>("/agents/default-prompt");
 }
 
 export const DEFAULT_TOOLS: AgentTools = {
-  generate_image: true, image_to_image: true, analyze_image: true,
+  generate_image: true, generate_video: true, image_to_image: true, analyze_image: true,
   search_inspiration: true,
 };

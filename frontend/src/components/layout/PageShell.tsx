@@ -22,7 +22,7 @@ export function PageShell({
   return (
     <div className="page">
       <div className="page-head">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="page-title-row">
           {back && <button className="back-btn" onClick={back}>← 返回</button>}
           <h1>{title}</h1>
         </div>

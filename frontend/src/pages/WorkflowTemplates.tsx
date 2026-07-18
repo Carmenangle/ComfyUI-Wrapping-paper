@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { FileUp, FolderSearch, Workflow as WorkflowIcon, Trash2, Pencil, FileText, Eye, List, ChevronUp, ChevronDown } from "lucide-react";
 import { type Settings, activeChatModel } from "../stores/settings";
 import { comfyStatus } from "../api/comfyui";
-import { lockUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+import { lockUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { useWorkflowTemplates } from "../lib/useWorkflowTemplates";
 import { DescribeModal, type DescribeValue } from "../components/DescribeModal";
 import { ConfirmModal, AlertModal, PromptModal } from "../components/Modal";
+import { PageShell } from "../components/layout/PageShell";
 import {
   rawWorkflowByPath,
   createTemplate,
@@ -54,10 +55,10 @@ export function WorkflowTemplates({ settings }: { settings: Settings }) {
   } = useWorkflowTemplates(settings);
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>工作流模板</h1>
-        <div style={{ display: "flex", gap: 8 }}>
+    <PageShell
+      title="工作流模板"
+      actions={
+        <>
           <button className="btn" onClick={onSyncNodes} disabled={nodeSyncing}
             title="扫描 ComfyUI 已装节点建立知识库，供 AI 搭工作流检索">
             <WorkflowIcon size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />
@@ -77,8 +78,9 @@ export function WorkflowTemplates({ settings }: { settings: Settings }) {
             选择文件导入
             <input type="file" accept=".json" hidden onChange={onPickFile} />
           </label>
-        </div>
-      </div>
+        </>
+      }
+    >
 
       {!settings.workflowDir && (
         <p style={{ color: "var(--text-muted)" }}>
@@ -166,6 +168,7 @@ export function WorkflowTemplates({ settings }: { settings: Settings }) {
             description: describeTarget.template.description || "",
             input_node_ids: describeTarget.template.input_node_ids || [],
             output_node_ids: describeTarget.template.output_node_ids || [],
+            primary_output_node_id: describeTarget.template.primary_output_node_id || "",
           }}
           onConfirm={saveDescribe}
           onCancel={() => setDescribeTarget(null)}
@@ -193,7 +196,7 @@ export function WorkflowTemplates({ settings }: { settings: Settings }) {
       {alertMsg && (
         <AlertModal title={alertMsg.title} message={alertMsg.message} onClose={() => setAlertMsg(null)} />
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -285,6 +288,7 @@ function NodeEditor({
       description: d.description,
       input_node_ids: d.input_node_ids,
       output_node_ids: d.output_node_ids,
+      primary_output_node_id: d.primary_output_node_id || "",
     };
     try {
       if (template) await updateTemplate(template.id, payload);
@@ -319,10 +323,10 @@ function NodeEditor({
   useEffect(() => {
     if (viewMode !== "comfy") return;
     const post = (type: string, payload: unknown) =>
-      postToFrame(iframeRef.current?.contentWindow, type, payload);
+      postToFrame(iframeRef.current?.contentWindow, type, payload, comfyUrl);
     const onMsg = async (ev: MessageEvent) => {
+      if (!isLafMessageFromStrict(ev, iframeRef.current?.contentWindow, comfyUrl)) return;
       const d = ev.data;
-      if (!isLafMessage(d)) return;
       if (d.type === "ready") {
         try {
           const r = await rawWorkflowByPath(sourcePath);
@@ -350,12 +354,12 @@ function NodeEditor({
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [viewMode, sourcePath, picked]);
+  }, [viewMode, sourcePath, picked, comfyUrl]);
 
   // 从右侧列表删除一个选中节点（同步取消画布高亮）
   const removePicked = (id: string) => {
     setPicked((prev) => prev.filter((p) => p.id !== id));
-    postToFrame(iframeRef.current?.contentWindow, "deselect", { id });
+    postToFrame(iframeRef.current?.contentWindow, "deselect", { id }, comfyUrl);
   };
 
   // 列表排序：上移/下移
@@ -371,7 +375,7 @@ function NodeEditor({
 
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+      <div className="template-editor-summary">
         <button className="back-btn" onClick={onBack}>
           ← 返回列表
         </button>
@@ -381,7 +385,7 @@ function NodeEditor({
         </span>
       </div>
 
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+      <div className="template-editor-toolbar">
         <div className="field" style={{ maxWidth: 360, flex: 1, margin: 0 }}>
           <label>模板名称</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="模板名称" />
@@ -403,7 +407,7 @@ function NodeEditor({
       {comfyHint && <p style={{ color: "#c98a1a", fontSize: 13, marginTop: 6 }}>{comfyHint}</p>}
 
       {viewMode === "comfy" && (
-        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+        <div className="template-canvas-layout">
           <div className="lock-canvas" style={{ height: 600, flex: 1 }}>
             <iframe
               ref={iframeRef}
@@ -558,6 +562,7 @@ function NodeEditor({
             description: template?.description || "",
             input_node_ids: template?.input_node_ids || [],
             output_node_ids: template?.output_node_ids || [],
+            primary_output_node_id: template?.primary_output_node_id || "",
           }}
           onConfirm={doSave}
           onCancel={() => setShowDescribe(false)}

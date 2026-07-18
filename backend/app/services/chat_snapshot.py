@@ -92,6 +92,21 @@ def upsert(thread_id: str, msg: dict) -> None:
         _save_unlocked(thread_id, items)
 
 
+def merge_fields(thread_id: str, mid: str, **fields) -> None:
+    """合并更新一条消息的结构化字段，不覆盖已有正文和媒体。"""
+    if not mid:
+        return
+    with _thread_lock(thread_id):
+        items = load(thread_id)
+        for i, item in enumerate(items):
+            if isinstance(item, dict) and item.get("id") == mid:
+                items[i] = {**item, **fields}
+                _save_unlocked(thread_id, items)
+                return
+        items.append(assistant_message(mid, "", **fields))
+        _save_unlocked(thread_id, items)
+
+
 def append_image(thread_id: str, mid: str, image_url: str, text: str = "") -> None:
     """按 mid upsert 一条带图 assistant 消息（mid 同时回传前端，重开不重复）。"""
     upsert(thread_id, _assistant_message(mid, text or "", image=image_url))

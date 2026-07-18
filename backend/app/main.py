@@ -1,11 +1,37 @@
-from fastapi import FastAPI
+import ipaddress
+import os
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.db import init_db
 from app.routers import ai, ai_providers, agents, assets, characters, comfyui, loras, mcp, models, node_manager, rag, runs, skills, user_state, workflows
 
 app = FastAPI(title="Local AI ComfyUI Frontend API")
 init_db()
+
+# 默认只服务本机：这是单机桌面壳，含无鉴权的进程控制/文件读写接口（start/stop/interrupt/
+# save-local/local-view 等）。CORS 只挡浏览器跨源，挡不住非浏览器客户端；故加回环门禁作纵深防御。
+# 确需局域网访问时，设环境变量 LAF_ALLOW_REMOTE=1 放开（自担风险）。
+_ALLOW_REMOTE = os.environ.get("LAF_ALLOW_REMOTE", "") == "1"
+
+
+@app.middleware("http")
+async def _loopback_only(request: Request, call_next):
+    if not _ALLOW_REMOTE:
+        client = request.client.host if request.client else ""
+        try:
+            is_loopback = ipaddress.ip_address(client).is_loopback
+        except ValueError:
+            is_loopback = client in ("localhost", "")
+        if not is_loopback:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "仅允许本机访问（如需局域网访问请设 LAF_ALLOW_REMOTE=1）"},
+            )
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,

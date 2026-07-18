@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ImagePlus } from "lucide-react";
+import { ImagePlus, Monitor } from "lucide-react";
 import type { Settings, Theme } from "../../stores/settings";
 import { localViewUrl } from "../../api/comfyui";
 import { uploadChatBg } from "../../api/userState";
@@ -10,10 +10,13 @@ export interface PanelProps {
   setDraft: React.Dispatch<React.SetStateAction<Settings>>;
 }
 
-const THEMES: { value: Theme; label: string }[] = [
-  { value: "light", label: "白天" },
-  { value: "dark", label: "夜间" },
-  { value: "system", label: "跟随系统" },
+const THEMES: { value: Exclude<Theme, "system">; label: string; description: string; colors: string[] }[] = [
+  { value: "bright", label: "明亮", description: "日光瓷白与矢车菊蓝", colors: ["#f8f7fa", "#647dcb"] },
+  { value: "night", label: "夜间", description: "深灰与柔白", colors: ["#1a1a1a", "#e5e5e5"] },
+  { value: "eye-care", label: "护眼", description: "暖米黄与橄榄金", colors: ["#f4efe0", "#a98a3c"] },
+  { value: "green", label: "绿色", description: "浅绿与深绿", colors: ["#e9f5e9", "#395932"] },
+  { value: "gray", label: "灰色", description: "冷浅灰与蓝灰", colors: ["#f3f4f6", "#394050"] },
+  { value: "high-contrast", label: "高对比", description: "纯黑与纯白", colors: ["#000000", "#ffffff"] },
 ];
 
 export function GeneralPanel({ draft, setDraft }: PanelProps) {
@@ -52,17 +55,32 @@ export function GeneralPanel({ draft, setDraft }: PanelProps) {
     <>
       <div className="settings-section">
         <h4>主题</h4>
-        <div className="theme-options">
+        <div className="theme-picker">
           {THEMES.map((t) => (
             <button
               key={t.value}
-              className={draft.theme === t.value ? "active" : ""}
+              className={draft.theme === t.value ? "theme-choice active" : "theme-choice"}
               onClick={() => setDraft((d) => ({ ...d, theme: t.value }))}
+              aria-pressed={draft.theme === t.value}
             >
-              {t.label}
+              <span className="theme-swatches" aria-hidden="true">
+                {t.colors.map((color) => <span key={color} style={{ background: color }} />)}
+              </span>
+              <span className="theme-choice-copy">
+                <strong>{t.label}</strong>
+                <small>{t.description}</small>
+              </span>
             </button>
           ))}
         </div>
+        <button
+          className={draft.theme === "system" ? "theme-system active" : "theme-system"}
+          onClick={() => setDraft((d) => ({ ...d, theme: "system" }))}
+          aria-pressed={draft.theme === "system"}
+        >
+          <Monitor size={16} />
+          <span><strong>跟随系统</strong><small>系统亮色使用明亮，暗色使用夜间</small></span>
+        </button>
       </div>
 
       <div className="settings-section">
@@ -72,7 +90,7 @@ export function GeneralPanel({ draft, setDraft }: PanelProps) {
         </p>
         <div className="field">
           <label>背景图路径</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="background-path-row">
             <input
               value={bg}
               onChange={(e) => set({ chatBgPath: e.target.value })}

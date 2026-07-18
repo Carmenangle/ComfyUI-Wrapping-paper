@@ -3,7 +3,7 @@ import { Sparkles, Workflow } from "lucide-react";
 import { getTemplateRaw } from "../api/workflows";
 import type { ChatMessage } from "../types/chat";
 import { fmtOpResults } from "../lib/opResults";
-import { lockUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+import { lockUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { mergeRequestedNodes } from "../lib/workflowDraft";
 
 // 工作流卡：选中模板后把所选节点逐个嵌入锁定的真实 ComfyUI 画布调参，
@@ -15,6 +15,7 @@ export function WorkflowCard({
   onDraft,
   onDone,
   onReopen,
+  onRun,
   onNotify,
   onOrchestrate,
 }: {
@@ -24,6 +25,7 @@ export function WorkflowCard({
   onDraft: (draftGraph: unknown) => void;
   onDone: (draftGraph: unknown, capturedGraph: unknown) => void;
   onReopen: () => void;
+  onRun: () => void;
   onNotify: (text: string) => void;
   onOrchestrate: () => void;
 }) {
@@ -113,17 +115,16 @@ export function WorkflowCard({
         if (loadSent) return;
         loadSent = true;
         console.log("[laf capture] -> send load");
-        postToFrame(frame.contentWindow, "load", { workflow, exposedIds: [] });
+        postToFrame(frame.contentWindow, "load", { workflow, exposedIds: [] }, comfyUrl);
       };
       const requestPrompt = () => {
         console.log("[laf capture] -> request_api_prompt");
-        postToFrame(frame.contentWindow, "request_api_prompt");
+        postToFrame(frame.contentWindow, "request_api_prompt", undefined, comfyUrl);
       };
       let tries = 0;
       const onMsg = (ev: MessageEvent) => {
+        if (!isLafMessageFromStrict(ev, frame.contentWindow, comfyUrl)) return; // 只认本隐藏 iframe 的消息
         const d = ev.data;
-        if (!isLafMessage(d)) return;
-        if (ev.source !== frame.contentWindow) return; // 只认本隐藏 iframe 的消息
         console.log("[laf capture] <- recv", d.type, d.payload?.ok, d.payload?.error || "");
         if (d.type === "ready") {
           // 扩展初始化完成、消息监听已挂 → 此刻发 load 才不会丢
@@ -133,7 +134,7 @@ export function WorkflowCard({
           // （自定义节点 JS 重建 widget 需一拍，延后再操作/抓取）
           if (ops && ops.length) {
             setTimeout(() => {
-              postToFrame(frame.contentWindow, "apply_ops", { ops });
+              postToFrame(frame.contentWindow, "apply_ops", { ops }, comfyUrl);
             }, 300);
           } else {
             setTimeout(requestPrompt, 300);
@@ -158,7 +159,7 @@ export function WorkflowCard({
       // 兜底改为：iframe load 后若 8s 仍没收到 ready，主动向其要一次 ready 触发（扩展会回 ready）。
       frame.addEventListener("load", () =>
         setTimeout(() => {
-          if (!loadSent) postToFrame(frame.contentWindow, "ping_ready");
+          if (!loadSent) postToFrame(frame.contentWindow, "ping_ready", undefined, comfyUrl);
         }, 8000),
       );
       setTimeout(() => { console.warn("[laf capture] TIMEOUT 30s"); finish(null); }, 30000); // 总超时：冷启动 ComfyUI 较慢，给足时间
@@ -171,15 +172,15 @@ export function WorkflowCard({
       if (!frame?.contentWindow) return resolve(null);
       let done = false;
       const onMsg = (ev: MessageEvent) => {
+        if (!isLafMessageFromStrict(ev, frame.contentWindow, comfyUrl, "node_values")) return;
         const d = ev.data;
-        if (!isLafMessage(d, "node_values")) return;
         if (String(d.payload.nodeId) !== String(nodeId)) return;
         done = true;
         window.removeEventListener("message", onMsg);
         resolve(d.payload);
       };
       window.addEventListener("message", onMsg);
-      postToFrame(frame.contentWindow, "request_node", { nodeId });
+      postToFrame(frame.contentWindow, "request_node", { nodeId }, comfyUrl);
       setTimeout(() => {
         if (!done) { window.removeEventListener("message", onMsg); resolve(null); }
       }, 3000);
@@ -248,19 +249,20 @@ export function WorkflowCard({
                 <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 6 }}>
                   参数已确认。下一条输入 <code>/s</code> 启动工作流；也可让 AI 再改参。
                 </p>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn primary" onClick={onRun}>运转工作流</button>
                   <button className="btn" onClick={onReopen}>更改</button>
                   <button className="btn" onClick={onOrchestrate} title="让 AI 规划这些输入/输出口怎么填">
                     <Sparkles size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     AI 编排
                   </button>
                   {fullWorkflow && (
-                    <button className="btn" title="把此工作流写入 AI 搭工作流页画布，新建会话继续编辑"
+                    <button className="btn" title="复制当前工作流到 AI 搭工作流页并新建会话；不会自动改回当前对话卡片"
                       onClick={() => {
                         try { localStorage.setItem("laf_pending_build_graph", JSON.stringify(fullWorkflow)); } catch { /* 太大则忽略 */ }
                         window.location.hash = "#/ai-build";
                       }}>
-                      在搭工作流页编辑
+                      复制到 AI 搭工作流页
                     </button>
                   )}
                 </div>
@@ -295,12 +297,10 @@ function NodeCard({
 
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
+      if (!isLafMessageFromStrict(ev, ref.current?.contentWindow, comfyUrl)) return;
       const d = ev.data;
-      if (!isLafMessage(d)) return;
-      // 仅响应来自本 iframe 的消息
-      if (ev.source !== ref.current?.contentWindow) return;
       if (d.type === "ready") {
-        postToFrame(ref.current?.contentWindow, "load", { workflow, exposedIds: [nodeId] });
+        postToFrame(ref.current?.contentWindow, "load", { workflow, exposedIds: [nodeId] }, comfyUrl);
       } else if (d.type === "loaded") {
         setLoaded(true);
       } else if (d.type === "node_size") {
@@ -313,7 +313,7 @@ function NodeCard({
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [workflow, nodeId]);
+  }, [workflow, nodeId, comfyUrl]);
 
   // aspectRatio 让外框宽高严格随节点真实比例，使展示区=节点本身的形状（不留黑边/不裁切）。
   // 不设 max-height：截断会破坏比例，导致画布留白、与节点对不齐。极高节点就按比例展示。

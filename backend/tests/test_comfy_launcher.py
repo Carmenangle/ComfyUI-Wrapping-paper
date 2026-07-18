@@ -62,3 +62,23 @@ def test_start_缺main_py抛LaunchError(tmp_path, monkeypatch):
         assert False, "应抛 LaunchError"
     except comfy_launcher.LaunchError as e:
         assert e.status == 400
+
+
+def test_restart_按停止等待启动顺序执行(monkeypatch):
+    calls = []
+    monkeypatch.setattr(comfy_launcher, "stop", lambda url: calls.append(("stop", url)))
+    monkeypatch.setattr(comfy_launcher.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
+    monkeypatch.setattr(
+        comfy_launcher,
+        "start",
+        lambda path, url: calls.append(("start", path, url)) or {"running": False},
+    )
+
+    result = comfy_launcher.restart("D:/ComfyUI", "http://127.0.0.1:8188")
+
+    assert result == {"running": False}
+    assert calls == [
+        ("stop", "http://127.0.0.1:8188"),
+        ("sleep", 1.5),
+        ("start", "D:/ComfyUI", "http://127.0.0.1:8188"),
+    ]

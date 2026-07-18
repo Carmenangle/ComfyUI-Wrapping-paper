@@ -3,7 +3,8 @@
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 
 from app.routers.ai_common import EmbedModelReq
 from app.services.sse import sse_response
@@ -18,7 +19,11 @@ class ImageAgentRequest(EmbedModelReq):
     gen_base_url: str = ""             # 生图模型（imageModels）
     gen_api_key: str = ""
     gen_model: str = ""
+    video_base_url: str = ""           # 视频模型（videoModels）
+    video_api_key: str = ""
+    video_model: str = ""
     size: str = "1024x1024"            # 生图尺寸（前端比例+分辨率档算好的 宽x高）
+    image_quality: Literal["auto", "low", "medium", "high"] = "high"
     output_dir: str = ""               # 输出图片路径（后端落盘留存云图）
     repo_id: str = ""                  # 留存/入库归属仓库（空则用 thread_id）
     message_id: str = ""               # 前端 botId：最终文本按此 id 落盘去重
@@ -26,6 +31,12 @@ class ImageAgentRequest(EmbedModelReq):
     style: str = ""                    # 用户手动选的提示词风格 sd/gpt/banana/""(自动)
     style_template: str = ""           # 自定义风格存档的整段内容（非空时优先于 style）
     agent_id: str = ""                 # 多 Agent：选中的 Agent 预设 id（空=内置默认行为）
+    approval_id: str = ""              # 历史提示词审批卡 id
+    approval_action: str = ""          # submit / change / cancel
+    edited_prompt: str = ""            # change 时用户在卡片内修改后的提示词
+    forced_route: str = ""              # 主管选择卡点击后的显式路由
+    user_message_id: str = ""            # 选择卡关联的原用户消息 id
+    context_max_tokens: int = Field(default=20_000, ge=4_000, le=200_000)
 
 
 # 单 agent 生成入口（POST /ai/image-agent → agent_runner.run_stream）已下线。
@@ -39,7 +50,7 @@ class MultiAgentRequest(ImageAgentRequest):
 
 @router.post("/multi-agent")
 def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
-    """Supervisor 多 Agent（LangGraph）：主管判意图→分派生图/图生图/反推/灵感专家。SSE 流式，
+    """Supervisor 多 Agent（LangGraph）：默认普通对话，明确执行时分派图片/视频/工具专家。SSE 流式，
     透出节点流转({trace})供前端展示协作过程。生成同样跑在 agent_runner 后台线程里。"""
     from app.services import agent_runner
     from app.services.agent_contracts import ModelConfig, RunContext
@@ -53,8 +64,10 @@ def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
         images=req.images or [],
         chat=ModelConfig(req.base_url, req.api_key, req.model),
         generation=ModelConfig(req.gen_base_url, req.gen_api_key, req.gen_model),
+        video=ModelConfig(req.video_base_url, req.video_api_key, req.video_model),
         embedding=ModelConfig(req.embed_base_url, req.embed_api_key, req.embed_model),
         size=req.size,
+        image_quality=req.image_quality,
         output_dir=req.output_dir,
         repo_id=req.repo_id or req.thread_id,
         message_id=req.message_id,
@@ -62,12 +75,65 @@ def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
         route_model=req.route_model,
         style_template=req.style_template,
         agent_id=req.agent_id,
+        approval_id=req.approval_id,
+        approval_action=req.approval_action,
+        edited_prompt=req.edited_prompt,
+        forced_route=req.forced_route,
+        user_message_id=req.user_message_id,
+        context_max_tokens=req.context_max_tokens,
     )
     try:
         q = agent_runner.run_multi_stream(context)
     except agent_runner.RunAlreadyActive as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return sse_response(lambda: agent_runner.drain(q))
+
+
+class RegenerateImageRequest(BaseModel):
+    thread_id: str
+    repo_id: str
+    prompt: str
+    images: list[str] = []
+    gen_base_url: str
+    gen_api_key: str
+    gen_model: str
+    size: str = "1024x1024"
+    image_quality: Literal["auto", "low", "medium", "high"] = "high"
+    output_dir: str = ""
+    embed_base_url: str = ""
+    embed_api_key: str = ""
+    embed_model: str = "embedding-3"
+
+
+@router.post("/regenerate-image")
+def regenerate_image(req: RegenerateImageRequest) -> dict[str, object]:
+    """按结果消息保存的不可变参数直接重放，不经过 Supervisor 或提示词改写。"""
+    from app.services import generation_store, image_gen
+
+    regeneration = {
+        "kind": "ai-image", "prompt": req.prompt, "images": list(req.images),
+        "size": req.size, "quality": req.image_quality,
+        "model": {"baseUrl": req.gen_base_url, "modelName": req.gen_model},
+    }
+    try:
+        if req.images:
+            url = image_gen.generate_with_images(
+                req.gen_base_url, req.gen_api_key, req.gen_model,
+                req.prompt, req.images, size=req.size, quality=req.image_quality,
+            )
+        else:
+            url = image_gen.generate(
+                req.gen_base_url, req.gen_api_key, req.gen_model,
+                req.prompt, size=req.size, quality=req.image_quality,
+            )
+        rec = generation_store.persist_image(
+            req.thread_id, req.repo_id, req.prompt, url, req.output_dir,
+            req.embed_base_url, req.embed_api_key, req.embed_model,
+            regeneration,
+        )
+        return {"ok": True, **rec}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"重新生图失败：{exc}") from exc
 
 
 @router.get("/image-agent/running")

@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Palette, FolderCog, BrainCircuit, Sparkles, Blocks, Puzzle, KeyRound, Bot } from "lucide-react";
-import type { Settings } from "../../stores/settings";
+import { applyTheme, type Settings } from "../../stores/settings";
 import { saveComfyConfig } from "../../api/comfyui";
+import {
+  auditOutputPath, migrateOutputPath, type OutputPathAudit,
+} from "../../api/assets";
+import { AlertModal, ConfirmModal } from "../../components/Modal";
 import { GeneralPanel } from "./GeneralPanel";
 import { PathsPanel } from "./PathsPanel";
 import { ModelsPanel } from "./ModelsPanel";
@@ -14,6 +18,7 @@ import { AgentPanel } from "./AgentPanel";
 interface Props {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
+  onOutputPathMigrated?: (oldDir: string, newDir: string) => void;
 }
 
 // 左侧导航项：分组 + 图标。id 对应右侧渲染的面板。
@@ -37,18 +42,97 @@ const NAV: { group: string; items: { id: NavId; label: string; icon: typeof Pale
   ] },
 ];
 
-export function SettingsView({ settings, update }: Props) {
+function sizeText(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function SettingsView({ settings, update, onOutputPathMigrated }: Props) {
   // 草稿：编辑都改这里，保存才写回，取消则丢弃（与原 Modal 一致）
   const [draft, setDraft] = useState<Settings>(settings);
   const [active, setActive] = useState<NavId>("general");
   const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pathReview, setPathReview] = useState<{
+    audit: OutputPathAudit;
+    next: Settings;
+    oldDir: string;
+    newDir: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const onSave = () => {
-    update(draft);
+  // 主题在设置页即时预览；未保存离开时恢复当前已保存主题。
+  useEffect(() => {
+    applyTheme(draft.theme);
+    return () => applyTheme(settings.theme);
+  }, [draft.theme, settings.theme]);
+
+  const commitSave = (next: Settings, migrated?: { oldDir: string; newDir: string }) => {
+    if (migrated) onOutputPathMigrated?.(migrated.oldDir, migrated.newDir);
+    update(next);
     // 同步 ComfyUI 路径/地址到后端，供 start-dev 脚本读取
-    saveComfyConfig(draft.comfyuiPath, draft.comfyuiUrl).catch(() => {});
+    saveComfyConfig(next.comfyuiPath, next.comfyuiUrl).catch(() => {});
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+  };
+
+  const onSave = async () => {
+    if (busy) return;
+    const oldDir = settings.outputDir.trim();
+    const newDir = draft.outputDir.trim();
+    if (oldDir === newDir) {
+      commitSave(draft);
+      return;
+    }
+    if (!oldDir) {
+      commitSave(draft);
+      return;
+    }
+    setBusy(true);
+    try {
+      const audit = await auditOutputPath(oldDir, newDir);
+      if (!audit.changed) {
+        commitSave(draft);
+        return;
+      }
+      if (audit.asset_count === 0) {
+        if (audit.missing_count > 0) {
+          setError(`旧路径下没有可迁移的资产，并有 ${audit.missing_count} 条裂图记录。请先在资产库清理缺失记录。`);
+        } else {
+          commitSave(draft);
+        }
+        return;
+      }
+      if (audit.conflict_count > 0) {
+        setError(`新路径中有 ${audit.conflict_count} 个同名但内容不同的文件。为避免覆盖，已取消保存，请更换目录或处理冲突。`);
+        return;
+      }
+      setPathReview({ audit, next: { ...draft }, oldDir, newDir });
+    } catch (reason) {
+      setError(`输出路径审查失败：${(reason as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmMigration = async () => {
+    if (!pathReview || busy) return;
+    setBusy(true);
+    try {
+      const result = await migrateOutputPath(pathReview.oldDir, pathReview.newDir);
+      const migrated = { oldDir: pathReview.oldDir, newDir: pathReview.newDir };
+      const next = pathReview.next;
+      setPathReview(null);
+      commitSave(next, migrated);
+      if (result.delete_failures > 0) {
+        setError(`资产已迁移且引用已更新，但有 ${result.delete_failures} 个旧文件未能删除，可稍后手动清理。`);
+      }
+    } catch (reason) {
+      setPathReview(null);
+      setError(`资产迁移失败，输出路径未保存：${(reason as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
@@ -75,7 +159,7 @@ export function SettingsView({ settings, update }: Props) {
       <div className="settings-content">
         <div className="settings-content-body">
           {active === "general" && <GeneralPanel draft={draft} setDraft={setDraft} />}
-          {active === "agent" && <AgentPanel />}
+          {active === "agent" && <AgentPanel draft={draft} setDraft={setDraft} />}
           {active === "paths" && <PathsPanel draft={draft} setDraft={setDraft} />}
           {active === "models" && <ModelsPanel draft={draft} setDraft={setDraft} />}
           {active === "style" && <StylePanel draft={draft} setDraft={setDraft} />}
@@ -86,9 +170,22 @@ export function SettingsView({ settings, update }: Props) {
         <div className="settings-footer">
           {dirty && <span className="settings-dirty">有未保存的更改</span>}
           {saved && <span className="settings-saved">已保存</span>}
-          <button className="btn" disabled={!dirty} onClick={onSave}>保存</button>
+          <button className="btn" disabled={!dirty || busy} onClick={onSave}>
+            {busy && !pathReview ? "审查中…" : "保存"}
+          </button>
         </div>
       </div>
+      {pathReview && (
+        <ConfirmModal
+          title="迁移资产库图片？"
+          message={`旧路径下有 ${pathReview.audit.asset_count} 条资产记录，共 ${pathReview.audit.file_count} 个可迁移文件（${sizeText(pathReview.audit.total_bytes)}）。切换路径前将完整复制到新目录，并同步资产库、对话记录和仓库封面。${pathReview.audit.missing_count > 0 ? ` 另有 ${pathReview.audit.missing_count} 个文件已经缺失，将保留原记录并跳过。` : ""}`}
+          confirmText="迁移并保存"
+          busy={busy}
+          onConfirm={confirmMigration}
+          onCancel={() => setPathReview(null)}
+        />
+      )}
+      {error && <AlertModal title="无法保存输出路径" message={error} onClose={() => setError(null)} />}
     </div>
   );
 }

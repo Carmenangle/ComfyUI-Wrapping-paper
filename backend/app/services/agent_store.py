@@ -2,8 +2,8 @@
 
 每个 Agent = 一套人设/行为配置，对话时可切换。结构：
 { id, name, systemPrompt, memory, temperature?, topP?, maxTokens?,
-  tools: {generate_image,image_to_image,analyze_image,search_inspiration,mcp,skills}(bool),
-  isDefault(bool，默认Agent带生图工具规则), enabled }
+  tools: {generate_image,generate_video,image_to_image,analyze_image,search_inspiration,mcp,skills}(bool),
+  isDefault(bool，默认 Agent 带普通对话优先的工具调用规则), enabled }
 
 agent_id 为空时智能体用内置默认行为（image_agent._AGENT_SYSTEM_BASE），与加此功能前完全一致——不破坏原功能。
 落盘模式仿 mcp_store / skills_store。
@@ -17,7 +17,7 @@ from uuid import uuid4
 from app.config import DATA_DIR
 
 # 内置工具键（供前端工具开关 + 后端过滤）。MCP/技能不在此，走 mcpServerIds/skillIds 列表选择
-TOOL_KEYS = ["generate_image", "image_to_image", "analyze_image", "search_inspiration"]
+TOOL_KEYS = ["generate_image", "generate_video", "image_to_image", "analyze_image", "search_inspiration"]
 
 
 def _path() -> Path:

@@ -8,6 +8,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -143,3 +144,10 @@ def stop(url: str = COMFYUI_BASE_URL) -> dict:
     if n > 0:
         return {"stopped": True, "message": f"已关闭 ComfyUI（{n} 个监听 {port} 的进程）"}
     return {"stopped": False, "message": f"未发现监听 {port} 的 ComfyUI 进程（可能已关闭）"}
+
+
+def restart(path: str, url: str, wait_seconds: float = 1.5) -> dict:
+    """关闭后等待端口释放，再按相同配置启动。"""
+    stop(url)
+    time.sleep(wait_seconds)
+    return start(path, url)

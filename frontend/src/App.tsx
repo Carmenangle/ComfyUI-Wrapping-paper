@@ -45,7 +45,10 @@ export function App() {
   const initial = parseHash();
   const [view, setView] = useState<View>(initial.view);
   const [activeRepoId, setActiveRepoId] = useState<string | null>(initial.repoId);
-  const { repos, addRepo, renameRepo, setCover, coverOf, deleteRepo, childrenOf } = useRepos();
+  const {
+    repos, addRepo, renameRepo, setCover, setGeneratedCover, relocateOutputPath,
+    coverOf, deleteRepo, childrenOf,
+  } = useRepos();
   const settingsStore = useSettings();
   const { settings } = settingsStore;
 
@@ -113,12 +116,18 @@ export function App() {
       </aside>
 
       <main className="main">
-        {view === "home" && <ChatView settings={settings} update={settingsStore.update} presets={settingsStore} setCover={setCover} />}
+        {view === "home" && <ChatView settings={settings} update={settingsStore.update} presets={settingsStore} setCover={setCover} setGeneratedCover={setGeneratedCover} />}
         {view === "assets" && <AssetsView onSendToChat={(url) => setSendImgUrl(url)} />}
         {view === "ai-build" && <AIBuildView onInstallNode={(q) => { setMarketSearch(q); setView("node-manager"); }} />}
         {view === "node-index" && <NodeIndexView />}
         {view === "node-manager" && <NodeManagerView initialSearch={marketSearch} onSearchConsumed={() => setMarketSearch("")} />}
-        {view === "settings" && <SettingsView settings={settings} update={settingsStore.update} />}
+        {view === "settings" && (
+          <SettingsView
+            settings={settings}
+            update={settingsStore.update}
+            onOutputPathMigrated={relocateOutputPath}
+          />
+        )}
         {view === "repos" && (
           <ReposView
             repos={childrenOf(undefined)}
@@ -153,6 +162,7 @@ export function App() {
             update={settingsStore.update}
             presets={settingsStore}
             setCover={setCover}
+            setGeneratedCover={setGeneratedCover}
             initialImage={pendingChatImage}
             onImageConsumed={() => setPendingChatImage(null)}
             onBack={() => {

@@ -1,4 +1,6 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, apiUrl } from "./client";
+import { comfyClientId } from "../lib/comfyProgress";
+import type { RegenerationSnapshot } from "../types/chat";
 
 export interface ComfyStatus {
   running: boolean;
@@ -51,10 +53,9 @@ export function submitWorkflow(
     values,
     prompt,
     url,
+    client_id: comfyClientId(),
   });
 }
-
-const API_BASE = "http://127.0.0.1:8010/api";
 
 export interface UploadResult {
   name: string;
@@ -66,7 +67,7 @@ export async function uploadImage(file: File, url: string): Promise<UploadResult
   const fd = new FormData();
   fd.append("file", file);
   fd.append("url", url);
-  const resp = await fetch(`${API_BASE}/comfyui/upload`, { method: "POST", body: fd });
+  const resp = await fetch(apiUrl("/comfyui/upload"), { method: "POST", body: fd });
   if (!resp.ok) throw new Error(`API request failed: ${resp.status}`);
   return resp.json();
 }
@@ -80,12 +81,14 @@ export interface ResultImage {
 export interface GenResult {
   status: "pending" | "running" | "completed";
   images: ResultImage[];
+  videos: ResultImage[];
   texts: string[];
 }
 
-export function getResult(promptId: string, url: string) {
+export function getResult(promptId: string, url: string, nodeIds: string[] = []) {
+  const extra = nodeIds.length > 0 ? `&node_ids=${encodeURIComponent(nodeIds.join(","))}` : "";
   return apiGet<GenResult>(
-    `/comfyui/result?prompt_id=${encodeURIComponent(promptId)}&url=${encodeURIComponent(url)}`,
+    `/comfyui/result?prompt_id=${encodeURIComponent(promptId)}&url=${encodeURIComponent(url)}${extra}`,
   );
 }
 
@@ -94,6 +97,8 @@ export interface FinalizedMessage {
   role: "assistant";
   text: string;
   image?: string;
+  video?: string;
+  regeneration?: RegenerationSnapshot;
 }
 
 export interface FinalizeGenerationResponse {
@@ -106,16 +111,18 @@ export interface FinalizeGenerationResponse {
 
 export function finalizeGeneration(args: {
   threadId: string; repoId: string; promptId: string; prompt: string;
-  images: ResultImage[]; outputDir: string; comfyuiUrl: string;
+  images: ResultImage[]; videos?: ResultImage[]; outputDir: string; comfyuiUrl: string;
   embed: { baseUrl: string; apiKey: string; modelName: string };
   chat: { baseUrl: string; apiKey: string; modelName: string };
+  regeneration?: RegenerationSnapshot;
 }) {
   return apiPost<FinalizeGenerationResponse>("/comfyui/finalize-generation", {
     thread_id: args.threadId, repo_id: args.repoId, prompt_id: args.promptId,
-    prompt: args.prompt, images: args.images, output_dir: args.outputDir,
+    prompt: args.prompt, images: args.images, videos: args.videos || [], output_dir: args.outputDir,
     comfyui_url: args.comfyuiUrl, embed_base: args.embed.baseUrl,
     embed_key: args.embed.apiKey, embed_model: args.embed.modelName,
     chat_base: args.chat.baseUrl, chat_key: args.chat.apiKey, chat_model: args.chat.modelName,
+    regeneration: args.regeneration,
   });
 }
 
@@ -127,7 +134,7 @@ export function viewUrl(img: ResultImage, url: string): string {
     subfolder: img.subfolder,
     url,
   });
-  return `${API_BASE}/comfyui/view?${qs.toString()}`;
+  return apiUrl(`/comfyui/view?${qs.toString()}`);
 }
 
 // 把原图留存到设置的 outputDir，返回本地文件路径
@@ -146,7 +153,7 @@ export function saveLocal(args: {
 
 // 本地留存原图的访问地址
 export function localViewUrl(path: string): string {
-  return `${API_BASE}/comfyui/local-view?path=${encodeURIComponent(path)}`;
+  return apiUrl(`/comfyui/local-view?path=${encodeURIComponent(path)}`);
 }
 
 // 通用模式留存：把任意图片地址（云端直链 / data URI）存到 outputDir。
@@ -162,7 +169,7 @@ export function saveLocalSrc(args: { src: string; repoId: string; outputDir: str
 
 // 从锁定画布回传的完整工作流直接提交生成
 export function submitGraph(workflow: unknown, url: string) {
-  return apiPost<SubmitResult>("/comfyui/submit_graph", { workflow, url });
+  return apiPost<SubmitResult>("/comfyui/submit_graph", { workflow, url, client_id: comfyClientId() });
 }
 
 // 强行停止 ComfyUI 生图（人工打断工作流）：删排队项 + 中断执行。prompt_id 可空。

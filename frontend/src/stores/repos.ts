@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { getUserState, renameRepoFolder } from "../api/userState";
 import { pushRepos } from "../lib/userStateSync";
+import { relocateLocalViewUrl } from "../lib/outputPathMigration";
+import {
+  orderReposByLatestGeneration,
+  recordGeneratedRepoCover,
+  replaceRepoCover,
+} from "../lib/repoOrdering";
 
 export interface Repo {
   id: string;
@@ -85,9 +91,21 @@ export function useRepos() {
     return true;
   };
 
-  // 设置仓库封面（每次生图完成时回填为最新图），记录时间戳供父仓库取最新
+  // 手动选择旧图作为封面时不能改变“最新生成图”排序时间。
   const setCover = (id: string, cover: string) => {
-    setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, cover, coverAt: Date.now() } : r)));
+    setRepos((prev) => replaceRepoCover(prev, id, cover));
+  };
+
+  // 只有真实生成结果落盘时更新生成图时间。
+  const setGeneratedCover = (id: string, cover: string) => {
+    setRepos((prev) => recordGeneratedRepoCover(prev, id, cover, Date.now()));
+  };
+
+  const relocateOutputPath = (oldDir: string, newDir: string) => {
+    setRepos((prev) => prev.map((repo) => ({
+      ...repo,
+      cover: relocateLocalViewUrl(repo.cover, oldDir, newDir),
+    })));
   };
 
   // 删除仓库时一并删除其下所有小仓库
@@ -95,7 +113,10 @@ export function useRepos() {
     setRepos((prev) => prev.filter((r) => r.id !== id && r.parentId !== id));
   };
 
-  const childrenOf = (parentId?: string) => repos.filter((r) => r.parentId === parentId);
+  const childrenOf = (parentId?: string) => orderReposByLatestGeneration(
+    repos.filter((r) => r.parentId === parentId),
+    repos,
+  );
 
   // 取仓库展示封面：小仓库用自身；顶层仓库用其子仓库里 coverAt 最新的一张
   const coverOf = (r: Repo): string | undefined => {
@@ -106,5 +127,8 @@ export function useRepos() {
     return kids[0].cover;
   };
 
-  return { repos, addRepo, renameRepo, setCover, coverOf, deleteRepo, childrenOf };
+  return {
+    repos, addRepo, renameRepo, setCover, setGeneratedCover, relocateOutputPath,
+    coverOf, deleteRepo, childrenOf,
+  };
 }

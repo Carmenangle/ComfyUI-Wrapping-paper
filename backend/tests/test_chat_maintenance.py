@@ -80,11 +80,17 @@ def test_compact_commits_same_summary_to_memory_and_snapshot(monkeypatch):
     _idle(monkeypatch)
     history = [{"role": "user", "content": "hello", "images": []}]
     monkeypatch.setattr(chat_maintenance.chat_memory, "get_history", lambda thread: history)
-    monkeypatch.setattr(chat_maintenance.chat_snapshot, "load_strict", lambda thread: [{"id": "old"}])
+    old_snapshot = [
+        {"id": "u1", "role": "user", "text": "最开始确定金发绿瞳"},
+        {"id": "a1", "role": "assistant", "text": "最终方案完成", "image": "local://final.png"},
+    ]
+    monkeypatch.setattr(chat_maintenance.chat_snapshot, "load_strict", lambda thread: old_snapshot)
     monkeypatch.setattr(chat_maintenance.rag_store, "list_generations", lambda thread, cfg: [{"prompt": "p"}])
-    monkeypatch.setattr(chat_maintenance.chat_memory, "summarize_history", lambda hist, llm, gens: {
-        "ok": True, "summary": "摘要正文", "image_count": 1,
-    })
+    summarized = []
+    def summarize(hist, llm, gens):
+        summarized.extend(hist)
+        return {"ok": True, "summary": "摘要正文", "image_count": 1}
+    monkeypatch.setattr(chat_maintenance.chat_memory, "summarize_history", summarize)
     snapshot_writes = []
     memory_writes = []
     monkeypatch.setattr(chat_maintenance.chat_snapshot, "save", lambda thread, value: snapshot_writes.append(value))
@@ -94,7 +100,30 @@ def test_compact_commits_same_summary_to_memory_and_snapshot(monkeypatch):
 
     assert result["message"] == snapshot_writes[-1][0]
     assert memory_writes[-1][0]["content"] == result["message"]["text"]
+    assert result["message"]["image"] == "local://final.png"
+    assert memory_writes[-1][0]["images"] == ["local://final.png"]
+    assert [item["content"] for item in summarized] == ["最开始确定金发绿瞳", "最终方案完成"]
     assert result["image_count"] == 1
+
+
+def test_compact_falls_back_to_latest_generation_image(monkeypatch):
+    _idle(monkeypatch)
+    history = [{"role": "user", "content": "hello", "images": []}]
+    monkeypatch.setattr(chat_maintenance.chat_memory, "get_history", lambda thread: history)
+    monkeypatch.setattr(chat_maintenance.chat_snapshot, "load_strict", lambda thread: [])
+    monkeypatch.setattr(chat_maintenance.rag_store, "list_generations", lambda thread, cfg: [
+        {"prompt": "old", "image_url": "local://old.png", "created_at": 1},
+        {"prompt": "new", "image_url": "local://new.png", "created_at": 2},
+    ])
+    monkeypatch.setattr(chat_maintenance.chat_memory, "summarize_history", lambda hist, llm, gens: {
+        "ok": True, "summary": "摘要正文", "image_count": 2,
+    })
+    monkeypatch.setattr(chat_maintenance.chat_snapshot, "save", lambda thread, value: None)
+    monkeypatch.setattr(chat_maintenance.chat_memory, "replace_history", lambda thread, value: None)
+
+    result = chat_maintenance.compact("repo", FakeLLM(), object())
+
+    assert result["message"]["image"] == "local://new.png"
 
 
 def test_compact_failure_before_commit_preserves_state(monkeypatch):

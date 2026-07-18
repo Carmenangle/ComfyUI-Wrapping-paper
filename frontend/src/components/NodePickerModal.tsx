@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { rawWorkflowByPath } from "../api/workflows";
-import { lockUrl, postToFrame, isLafMessage } from "../lib/lafLock";
+import { lockUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 
 interface Props {
   title: string;            // 提示词输入口 / 图像输入口
@@ -18,10 +18,10 @@ export function NodePickerModal({ title, comfyUrl, sourcePath, onPick, onCancel 
 
   useEffect(() => {
     const post = (type: string, payload: unknown) =>
-      postToFrame(iframeRef.current?.contentWindow, type, payload);
+      postToFrame(iframeRef.current?.contentWindow, type, payload, comfyUrl);
     const onMsg = async (ev: MessageEvent) => {
+      if (!isLafMessageFromStrict(ev, iframeRef.current?.contentWindow, comfyUrl)) return;
       const d = ev.data;
-      if (!isLafMessage(d)) return;
       if (d.type === "ready") {
         try {
           const r = await rawWorkflowByPath(sourcePath);
@@ -37,12 +37,12 @@ export function NodePickerModal({ title, comfyUrl, sourcePath, onPick, onCancel 
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [sourcePath]);
+  }, [sourcePath, comfyUrl]);
 
   // 重选：取消当前候选并清除画布高亮
   const reselect = () => {
     if (pending) {
-      postToFrame(iframeRef.current?.contentWindow, "deselect", { id: pending.id });
+      postToFrame(iframeRef.current?.contentWindow, "deselect", { id: pending.id }, comfyUrl);
     }
     setPending(null);
   };

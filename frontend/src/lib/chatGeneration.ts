@@ -1,7 +1,7 @@
 // 生成流程的纯判定/整形逻辑（无 React、无 I/O）：从 useChatSession 闭包里抽出，
 // 让「图像门 / 快照瘦身 / 文本打分」这些真会咬人的分支可被单测。
 // 依赖注入原则：涉及落盘的部分（persist）由调用方传入函数，本模块只管遍历与决策。
-import type { ChatMessage } from "../types/chat";
+import type { ChatMessage, RegenerationSnapshot } from "../types/chat";
 import type { Template } from "../api/workflows";
 
 // ===== 图像门（image gate）=====
@@ -85,6 +85,10 @@ export async function slimSnapshot(
         nm = { ...nm, portsPlan: { ...pp, images: imgs } };
       }
     }
+    if (nm.regeneration?.kind === "ai-image" && nm.regeneration.images.length) {
+      const images = await Promise.all(nm.regeneration.images.map((src) => persist(src)));
+      nm = { ...nm, regeneration: { ...nm.regeneration, images } };
+    }
     out.push(nm);
   }
   return out;
@@ -93,14 +97,26 @@ export async function slimSnapshot(
 export interface PendingGeneration {
   prompt_id: string;
   createdAt: number;
+  outputNodeIds?: string[];   // 主输出节点过滤（切仓库/刷新后 resume 重挂轮询时复用）
+  regeneration?: RegenerationSnapshot;
 }
 
 export function registerPending(
   pending: readonly PendingGeneration[],
   promptId: string,
   createdAt: number,
+  outputNodeIds: string[] = [],
+  regeneration?: RegenerationSnapshot,
 ): PendingGeneration[] {
-  return [...pending.filter((item) => item.prompt_id !== promptId), { prompt_id: promptId, createdAt }];
+  return [
+    ...pending.filter((item) => item.prompt_id !== promptId),
+    {
+      prompt_id: promptId,
+      createdAt,
+      ...(outputNodeIds.length ? { outputNodeIds } : {}),
+      ...(regeneration ? { regeneration } : {}),
+    },
+  ];
 }
 
 export function unregisterPending(

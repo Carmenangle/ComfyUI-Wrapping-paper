@@ -65,6 +65,7 @@ def _normalize(record: dict) -> dict:
         "node_order": _normalize_ids(record.get("node_order")),
         "input_node_ids": inputs,
         "output_node_ids": _normalize_ids(record.get("output_node_ids")),
+        "primary_output_node_id": str(record.get("primary_output_node_id") or "").strip(),
         "prompt_node_id": str(record.get("prompt_node_id") or "").strip(),
         "image_node_id": str(record.get("image_node_id") or "").strip(),
     })
@@ -123,6 +124,7 @@ def save_template(data: dict, template_id: str | None = None) -> dict:
         "image_node_id": data.get("image_node_id", ""),
         "input_node_ids": data.get("input_node_ids", []),
         "output_node_ids": data.get("output_node_ids", []),
+        "primary_output_node_id": data.get("primary_output_node_id", ""),
         "created_at": created,
         "updated_at": now,
     })
