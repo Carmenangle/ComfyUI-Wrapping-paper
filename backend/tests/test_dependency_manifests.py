@@ -35,3 +35,14 @@ def test_runtime_reassembly_helpers_do_not_require_python():
 
     assert "python3" not in shell
     assert "python.exe" not in powershell.lower()
+
+
+def test_runtime_release_validates_windows_vendor_on_windows_runner():
+    workflow = (ROOT / ".github" / "workflows" / "runtime-release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "vendor-closure:" in workflow
+    assert "runs-on: windows-2025" in workflow
+    assert "needs: [plan, quality, vendor-closure]" in workflow
+    assert "python scripts/release_preflight.py" in workflow

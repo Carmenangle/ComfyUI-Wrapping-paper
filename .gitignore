@@ -28,6 +28,7 @@ WORKFLOW_BUILDER_PLAN.md
 .DS_Store
 Thumbs.db
 *.tmp
+ComfyUI-Wrapping-paper-v*.zip
 _backfill.py
 _check.py
 _chk.py

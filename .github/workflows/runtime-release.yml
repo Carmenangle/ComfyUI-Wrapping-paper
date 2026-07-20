@@ -64,8 +64,21 @@ jobs:
           npm test
           npm run build
 
+  vendor-closure:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Windows 离线依赖与发布闭包门禁
+        run: python scripts/release_preflight.py
+
   build:
-    needs: [plan, quality]
+    needs: [plan, quality, vendor-closure]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

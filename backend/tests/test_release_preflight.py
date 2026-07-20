@@ -1,6 +1,9 @@
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,8 +17,12 @@ SPEC.loader.exec_module(preflight)
 
 def test_release_preflight_current_tree_is_closed():
     assert preflight.validate(ROOT) == []
-    assert preflight.offline_dependency_error(ROOT) is None
     assert preflight.offline_npm_dependency_error(ROOT) is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="vendor/pip 是 Windows wheel 集")
+def test_windows_offline_dependency_tree_is_closed():
+    assert preflight.offline_dependency_error(ROOT) is None
 
 
 def test_release_preflight_detects_missing_css_asset(tmp_path):
