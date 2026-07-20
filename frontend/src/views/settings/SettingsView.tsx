@@ -71,7 +71,7 @@ export function SettingsView({ settings, update, onOutputPathMigrated }: Props) 
     if (migrated) onOutputPathMigrated?.(migrated.oldDir, migrated.newDir);
     update(next);
     // 同步 ComfyUI 路径/地址到后端，供 start-dev 脚本读取
-    saveComfyConfig(next.comfyuiPath, next.comfyuiUrl).catch(() => {});
+    saveComfyConfig(next.comfyuiPath, next.comfyuiUrl, next.comfyuiPython).catch(() => {});
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };

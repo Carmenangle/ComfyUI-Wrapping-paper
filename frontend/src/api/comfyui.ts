@@ -11,10 +11,11 @@ export function comfyStatus(url: string) {
   return apiGet<ComfyStatus>(`/comfyui/status?url=${encodeURIComponent(url)}`);
 }
 
-export function startComfy(path: string, url: string) {
+export function startComfy(path: string, url: string, pythonPath = "") {
   return apiPost<{ running: boolean; managed: boolean; message: string }>("/comfyui/start", {
     path,
     url,
+    python_path: pythonPath,
   });
 }
 
@@ -24,16 +25,19 @@ export function stopComfy(url: string, path = "") {
 }
 
 // 重启 ComfyUI（装完插件生效）：先关再起，需 path 重新拉起
-export function restartComfy(path: string, url: string) {
+export function restartComfy(path: string, url: string, pythonPath = "") {
   return apiPost<{ running: boolean; managed: boolean; message: string }>("/comfyui/restart", {
     path,
     url,
+    python_path: pythonPath,
   });
 }
 
 // 把 ComfyUI 路径/地址落盘到后端，供 start-dev 脚本读取
-export function saveComfyConfig(path: string, url: string) {
-  return apiPost<{ path: string; url: string }>("/comfyui/config", { path, url });
+export function saveComfyConfig(path: string, url: string, pythonPath = "") {
+  return apiPost<{ path: string; url: string; python_path: string }>("/comfyui/config", {
+    path, url, python_path: pythonPath,
+  });
 }
 
 export interface SubmitResult {

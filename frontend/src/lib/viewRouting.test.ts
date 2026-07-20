@@ -25,14 +25,14 @@ describe("calcSize", () => {
     expect(calcSize("1:1", "2k")).toBe("2560x2560");
     expect(calcSize("1:1", "4k")).toBe("3840x3840");
   });
-  it("横向：最长边按档位，另一边按比例并对齐 4", () => {
+  it("横向：最长边按档位，另一边按比例并对齐 16", () => {
     expect(calcSize("2:1", "1k")).toBe("1280x640");
     expect(calcSize("2:1", "2k")).toBe("2560x1280");
     expect(calcSize("2:1", "4k")).toBe("3840x1920");
     expect(calcSize("16:9", "1k")).toBe("1280x720");
     expect(calcSize("16:9", "2k")).toBe("2560x1440");
     expect(calcSize("16:9", "4k")).toBe("3840x2160");
-    expect(calcSize("21:9", "4k")).toBe("3840x1644");
+    expect(calcSize("21:9", "4k")).toBe("3840x1648");
   });
   it("纵向比例与标准表一致", () => {
     expect(calcSize("1:2", "1k")).toBe("640x1280");
@@ -44,9 +44,18 @@ describe("calcSize", () => {
     expect(calcSize("9:16", "1k")).toBe("720x1280");
     expect(calcSize("9:16", "2k")).toBe("1440x2560");
     expect(calcSize("9:16", "4k")).toBe("2160x3840");
-    expect(calcSize("9:21", "1k")).toBe("548x1280");
-    expect(calcSize("9:21", "2k")).toBe("1096x2560");
-    expect(calcSize("9:21", "4k")).toBe("1644x3840");
+    expect(calcSize("9:21", "1k")).toBe("544x1280");
+    expect(calcSize("9:21", "2k")).toBe("1104x2560");
+    expect(calcSize("9:21", "4k")).toBe("1648x3840");
+  });
+  it("所有预设尺寸的宽高都是 16 的倍数", () => {
+    for (const aspect of ASPECTS) {
+      for (const tier of Object.keys(RES_TIERS)) {
+        const [width, height] = calcSize(aspect, tier).split("x").map(Number);
+        expect(width % 16, `${aspect} ${tier} width`).toBe(0);
+        expect(height % 16, `${aspect} ${tier} height`).toBe(0);
+      }
+    }
   });
   it("未知档位回退 1280", () => {
     expect(calcSize("1:1", "9k")).toBe("1280x1280");
@@ -83,5 +92,13 @@ describe("custom image size", () => {
     expect(normalizeCustomDimension(32)).toBe(64);
     expect(normalizeCustomDimension(5000)).toBe(3840);
     expect(normalizeCustomDimension("bad", 1024)).toBe(1024);
+  });
+
+  it("aligns custom dimensions to multiples of 16", () => {
+    expect(normalizeCustomDimension(1672)).toBe(1680);
+    expect(normalizeCustomDimension(941)).toBe(944);
+    expect(resolveImageSize("1:1", "1k", true, 1537, 193, true)).toMatchObject({
+      size: "1536x192", mode: "custom",
+    });
   });
 });

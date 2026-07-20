@@ -12,6 +12,7 @@ import httpx
 from app.services import (
     chat_memory, chat_snapshot, image_store, rag_store, repo_meta, view_urls,
 )
+from app.services.rag_backend import EmbedConfig
 from app.services.pathnames import safe_seg
 
 _LOG = logging.getLogger("uvicorn.error")
@@ -85,7 +86,7 @@ def _save_remote_image(url: str, output_dir: str, repo_id: str = "home") -> str:
         return url
 
 
-def _index_with_retry(repo_id: str, cfg: rag_store.EmbedConfig, prompt: str,
+def _index_with_retry(repo_id: str, cfg: EmbedConfig, prompt: str,
                       tags: str = "", image_url: str = "") -> bool:
     for attempt in range(3):
         try:
@@ -105,7 +106,7 @@ def persist_image(thread_id: str, repo_id: str, prompt: str, image_url: str,
     """Agent 图片：容错留存后入库并追加快照，返回前后端共用身份。"""
     shown = _save_remote_image(image_url, output_dir, repo_id)
     mid = str(uuid.uuid4())
-    cfg = rag_store.EmbedConfig(embed_base, embed_key, embed_model)
+    cfg = EmbedConfig(embed_base, embed_key, embed_model)
     _index_with_retry(repo_id, cfg, prompt, image_url=shown)
     try:
         chat_snapshot.upsert(
@@ -201,7 +202,7 @@ def finalize_workflow_batch(
         raise ValueError("生成结果没有图片、视频或文字")
 
     durable = repo_id != "home"
-    cfg = rag_store.EmbedConfig(embed_base, embed_key, embed_model)
+    cfg = EmbedConfig(embed_base, embed_key, embed_model)
     tags = _extract_tags(prompt, chat_base, chat_key, chat_model) if durable else ""
     messages: list[dict] = []
     results: list[dict] = []

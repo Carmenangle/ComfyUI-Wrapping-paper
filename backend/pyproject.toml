@@ -19,4 +19,3 @@ warn_unused_ignores = true
 # 契约模块内要求较严；其余靠 follow_imports=silent 兜住不外溢。
 disallow_untyped_defs = false
 check_untyped_defs = true
-

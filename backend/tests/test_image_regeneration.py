@@ -43,3 +43,36 @@ def test_regenerate_image_reuploads_all_bound_references(monkeypatch):
         "1536x1024", "medium",
     )]
     assert result["regeneration"] == snapshot
+
+
+def test_regenerate_masked_image_reuploads_bound_mask(monkeypatch):
+    captured = {}
+
+    def fake_generate(base_url, api_key, model, prompt, images, **kwargs):
+        captured.update({"images": images, **kwargs})
+        return "generated.png"
+
+    monkeypatch.setattr(image_gen, "generate_with_images", fake_generate)
+    monkeypatch.setattr(
+        generation_store,
+        "persist_image",
+        lambda *args: {"id": "masked-result", "url": "saved.png", "regeneration": args[-1]},
+    )
+    req = ai_agent.RegenerateImageRequest(
+        thread_id="thread-1",
+        repo_id="repo-1",
+        prompt="只修改选区",
+        images=[],
+        image_mask={"image": "original.png", "mask": "mask.png"},
+        gen_base_url="https://images.example",
+        gen_api_key="secret",
+        gen_model="image-v2",
+    )
+
+    result = ai_agent.regenerate_image(req)
+
+    assert captured["images"] == ["original.png"]
+    assert captured["mask"] == "mask.png"
+    assert result["regeneration"]["imageMask"] == {
+        "image": "original.png", "mask": "mask.png",
+    }

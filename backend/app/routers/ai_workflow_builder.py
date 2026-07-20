@@ -22,6 +22,12 @@ from app.services.comfyui_client import ComfyError
 router = APIRouter()
 
 
+def _build_chat(*args, **kwargs):
+    """搭建层自行控制重试轮次，传输层每轮只发起一次上游请求。"""
+    kwargs["retries"] = 1
+    return chat(*args, **kwargs)
+
+
 class SyncNodesRequest(EmbedModelReq):
     comfy_url: str = COMFYUI_BASE_URL
     full: bool = False                 # True 全量重建，False 增量
@@ -120,6 +126,7 @@ class BuildRequest(EmbedModelReq):
     max_retries: int = 4               # 校验失败回喂 AI 重连次数（widget 候选纠错多留 1 轮收敛）
     current_graph: dict = {}           # 当前右侧画布(API格式)，非空=在其基础上增量改
     save: bool = True                  # 是否落盘到 workflow_dir（多轮迭代中途可传 False 只回图）
+    history: list[dict] = []           # 搭建页多轮对话
 
 
 @router.post("/build")
@@ -127,10 +134,10 @@ def build(req: BuildRequest) -> dict:
     """按需求自动搭工作流：检索节点→AI 生成→校验重试→落盘。返回 {ok, path, graph, errors}。"""
     try:
         return workflow_builder.build_graph(
-            chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
+            _build_chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
             cfg=req.embed_cfg(), need=req.need, comfy_url=req.comfy_url,
             workflow_dir=req.workflow_dir, name=req.name, max_retries=req.max_retries,
-            current_graph=req.current_graph, save=req.save,
+            current_graph=req.current_graph, save=req.save, history=req.history,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -161,6 +168,7 @@ class ModuleRequest(EmbedModelReq):
     comfy_url: str = COMFYUI_BASE_URL
     current_graph: dict = {}           # 当前冻结图（AI 不许改，只在其上加模块）
     max_retries: int = 2               # 增量模式重试：慢中转下每轮 opus 都慢，4 次易累计爆 240s→降 2(首次+1次纠错，配 slim 通常够)
+    history: list[dict] = []
 
 
 @router.post("/build/module")
@@ -169,9 +177,9 @@ def build_module(req: ModuleRequest) -> dict:
     不落盘，返回 {ok, graph, errors}（graph 为合并后完整图，前端写回画布）。"""
     try:
         return workflow_builder.build_module(
-            chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
+            _build_chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
             cfg=req.embed_cfg(), need=req.need, comfy_url=req.comfy_url,
-            current_graph=req.current_graph, max_retries=req.max_retries,
+            current_graph=req.current_graph, max_retries=req.max_retries, history=req.history,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -183,6 +191,7 @@ class DirectRequest(EmbedModelReq):
     need: str = ""
     comfy_url: str = COMFYUI_BASE_URL
     current_graph: dict = {}           # 当前画布，非空=在其基础上改并输出完整新图
+    history: list[dict] = []
 
 
 @router.post("/build/direct")
@@ -193,9 +202,9 @@ def build_direct(req: DirectRequest) -> dict:
     返回 {ok, graph, errors, warnings}。"""
     try:
         return workflow_builder.build_direct(
-            chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
+            _build_chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
             cfg=req.embed_cfg(), need=req.need, comfy_url=req.comfy_url,
-            current_graph=req.current_graph,
+            current_graph=req.current_graph, history=req.history,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -207,6 +216,7 @@ class PlanRequest(EmbedModelReq):
     need: str = ""
     comfy_url: str = COMFYUI_BASE_URL
     current_graph: dict = {}           # 当前画布，非空=在其基础上讨论增量改动
+    history: list[dict] = []
 
 
 @router.post("/build/plan")
@@ -214,12 +224,14 @@ def build_plan(req: PlanRequest) -> dict:
     """顾问模式：只产出给人看的中文方案文本，不生成/不改画布。用户看后点『同意执行』再走 build/module。"""
     try:
         return workflow_builder.build_plan(
-            chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
+            _build_chat, base_url=req.base_url, api_key=req.api_key, model=req.model, proxy=req.proxy,
             cfg=req.embed_cfg(), need=req.need, comfy_url=req.comfy_url,
-            current_graph=req.current_graph,
+            current_graph=req.current_graph, history=req.history,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ComfyError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 # —— 搭建会话：进度保存 + 多开 ——

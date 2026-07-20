@@ -1,0 +1,83 @@
+{
+  "theme": "night",
+  "steps": [
+    {"op":"webp","source":"night深青黑精纺无缝纹理.png","target":"textures/night/deep-teal-worsted-tile.webp","mode":"resize","size":[1024,1024],"lossless":true,"quality":90},
+    {"op":"webp","source":"night暖黑丝质无缝纹理.png","target":"textures/night/warm-black-silk-tile.webp","mode":"resize","size":[1024,1024],"lossless":true,"quality":90},
+    {"op":"webp","source":"night无月观测所记录室对话背景.png","target":"backgrounds/night/chat-moonless-observatory.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"night极简天球记录对话背景.png","target":"backgrounds/night/chat-celestial-record.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"night天球经纬横条.png","target":"textures/night/celestial-coordinate-strip.webp","mode":"crop_resize","box":[0,248,-1,555],"visible":false,"size":[1536,192],"lossless":true},
+
+    {"op":"png","id":"corner-atlas","source":"night夜风流线角饰图集.png","target":"ornaments/night/night-wind-corners.png","preprocess":"clean_alpha","size":[2048,2048]},
+    {"op":"png","id":"corner-flow","source":"night夜风流线角饰图集.png","target":"ornaments/night/corner-flow.png","preprocess":"clean_alpha","box":[70,70,540,550],"visible":true,"padding":6},
+    {"op":"png","id":"corner-cut","source":"night夜风流线角饰图集.png","target":"ornaments/night/corner-cut.png","preprocess":"clean_alpha","box":[700,70,1190,550],"visible":true,"padding":6},
+    {"op":"png","id":"corner-gem","source":"night夜风流线角饰图集.png","target":"ornaments/night/corner-gem.png","preprocess":"clean_alpha","box":[60,680,550,1185],"visible":true,"padding":6},
+    {"op":"png","id":"corner-floral","source":"night夜风流线角饰图集.png","target":"ornaments/night/corner-floral.png","preprocess":"clean_alpha","box":[700,680,1190,1185],"visible":true,"padding":6},
+
+    {"op":"png","id":"divider-single","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-single.png","preprocess":"white_to_alpha","box":[200,350,3640,405],"visible":true,"padding":6},
+    {"op":"png","id":"divider-double","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-double.png","preprocess":"white_to_alpha","box":[200,660,3640,735],"visible":true,"padding":6},
+    {"op":"png","id":"divider-node","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-node.png","preprocess":"white_to_alpha","box":[200,970,3640,1145],"visible":true,"padding":6},
+    {"op":"png","id":"divider-wave","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-wave.png","preprocess":"white_to_alpha","box":[200,1335,3640,1655],"visible":true,"padding":6},
+    {"op":"png","id":"divider-bar","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-bar.png","preprocess":"white_to_alpha","box":[200,1890,3640,2015],"visible":true,"padding":6},
+    {"op":"png","id":"divider-star","source":"night分隔线与状态节点图集.png","target":"ornaments/night/divider-star.png","preprocess":"white_to_alpha","box":[180,2220,3660,2375],"visible":true,"padding":6},
+    {"op":"png","id":"timeline-vertical","source":"night分隔线与状态节点图集.png","target":"ornaments/night/timeline-vertical.png","preprocess":"white_to_alpha","box":[350,2525,620,3545],"visible":true,"padding":6},
+    {"op":"png","id":"node-default","source":"night分隔线与状态节点图集.png","target":"ornaments/night/node-default.png","preprocess":"white_to_alpha","box":[1010,2850,1300,3145],"visible":true,"padding":6},
+    {"op":"png","id":"node-active","source":"night分隔线与状态节点图集.png","target":"ornaments/night/node-active.png","preprocess":"white_to_alpha","box":[1415,2850,1705,3145],"visible":true,"padding":6},
+    {"op":"png","id":"node-success","source":"night分隔线与状态节点图集.png","target":"ornaments/night/node-success.png","preprocess":"white_to_alpha","box":[1818,2850,2110,3145],"visible":true,"padding":6},
+    {"op":"png","id":"node-warning","source":"night分隔线与状态节点图集.png","target":"ornaments/night/node-warning.png","preprocess":"white_to_alpha","box":[2220,2850,2515,3145],"visible":true,"padding":6},
+    {"op":"png","id":"node-error","source":"night分隔线与状态节点图集.png","target":"ornaments/night/node-error.png","preprocess":"white_to_alpha","box":[2625,2850,2920,3145],"visible":true,"padding":6},
+    {"op":"png","id":"compass-star","source":"night分隔线与状态节点图集.png","target":"ornaments/night/compass-star.png","preprocess":"white_to_alpha","box":[3040,2715,3610,3280],"visible":true,"padding":6},
+    {"op":"atlas","target":"ornaments/night/dividers-and-nodes.png","size":[2048,1024],"items":[
+      {"ref":"divider-single","box":[50,20,1998,100]}, {"ref":"divider-double","box":[50,120,1998,210]},
+      {"ref":"divider-node","box":[50,230,1998,340]}, {"ref":"divider-wave","box":[50,360,1998,500]},
+      {"ref":"divider-bar","box":[50,520,1998,620]}, {"ref":"divider-star","box":[50,640,1998,750]},
+      {"ref":"node-default","box":[430,790,550,970]}, {"ref":"node-active","box":[650,790,770,970]},
+      {"ref":"node-success","box":[870,790,990,970]}, {"ref":"node-warning","box":[1090,790,1210,970]},
+      {"ref":"node-error","box":[1310,790,1430,970]}, {"ref":"compass-star","box":[1560,770,1780,990]}
+    ]},
+
+    {"op":"png","id":"button-main-default","source":"night按钮状态表面图集.png","target":"controls/night/button-main-default.png","preprocess":"clean_alpha","box":[40,50,745,275],"visible":true,"padding":2},
+    {"op":"png","id":"button-main-hover","source":"night按钮状态表面图集.png","target":"controls/night/button-main-hover.png","preprocess":"clean_alpha","box":[40,285,745,510],"visible":true,"padding":2},
+    {"op":"png","id":"button-main-pressed","source":"night按钮状态表面图集.png","target":"controls/night/button-main-pressed.png","preprocess":"clean_alpha","box":[40,520,745,745],"visible":true,"padding":2},
+    {"op":"png","id":"button-main-disabled","source":"night按钮状态表面图集.png","target":"controls/night/button-main-disabled.png","preprocess":"clean_alpha","box":[40,750,745,975],"visible":true,"padding":2},
+    {"op":"png","id":"button-secondary-default","source":"night按钮状态表面图集.png","target":"controls/night/button-secondary-default.png","preprocess":"clean_alpha","box":[785,50,1495,275],"visible":true,"padding":2},
+    {"op":"png","id":"button-secondary-hover","source":"night按钮状态表面图集.png","target":"controls/night/button-secondary-hover.png","preprocess":"clean_alpha","box":[785,285,1495,510],"visible":true,"padding":2},
+    {"op":"png","id":"button-secondary-pressed","source":"night按钮状态表面图集.png","target":"controls/night/button-secondary-pressed.png","preprocess":"clean_alpha","box":[785,520,1495,745],"visible":true,"padding":2},
+    {"op":"png","id":"button-secondary-disabled","source":"night按钮状态表面图集.png","target":"controls/night/button-secondary-disabled.png","preprocess":"clean_alpha","box":[785,750,1495,975],"visible":true,"padding":2},
+    {"op":"atlas","target":"controls/night/button-state-overlays.png","size":[2048,1024],"items":[
+      {"ref":"button-main-default","box":[16,32,496,480]}, {"ref":"button-main-hover","box":[528,32,1008,480]},
+      {"ref":"button-main-pressed","box":[1040,32,1520,480]}, {"ref":"button-main-disabled","box":[1552,32,2032,480]},
+      {"ref":"button-secondary-default","box":[16,544,496,992]}, {"ref":"button-secondary-hover","box":[528,544,1008,992]},
+      {"ref":"button-secondary-pressed","box":[1040,544,1520,992]}, {"ref":"button-secondary-disabled","box":[1552,544,2032,992]}
+    ]},
+
+    {"op":"png","id":"message-assistant","source":"night消息表面纹理图集.png","target":"controls/night/message-assistant.png","preprocess":"clean_alpha","box":[90,25,735,655],"visible":true,"padding":2},
+    {"op":"png","id":"message-user","source":"night消息表面纹理图集.png","target":"controls/night/message-user.png","preprocess":"clean_alpha","box":[90,645,735,1275],"visible":true,"padding":2},
+    {"op":"png","id":"message-system","source":"night消息表面纹理图集.png","target":"controls/night/message-system.png","preprocess":"clean_alpha","box":[90,1265,735,1890],"visible":true,"padding":2},
+    {"op":"atlas","target":"controls/night/message-surface-overlays.png","size":[2048,1024],"items":[
+      {"ref":"message-assistant","box":[24,38,658,986]}, {"ref":"message-user","box":[706,38,1340,986]},
+      {"ref":"message-system","box":[1388,38,2022,986]}
+    ]},
+
+    {"op":"png","id":"composer-top","source":"night输入区与拖动手柄边饰.png","target":"controls/night/composer-top.png","preprocess":"white_to_alpha","box":[120,700,3720,1040],"visible":true,"padding":6},
+    {"op":"png","id":"composer-handle","source":"night输入区与拖动手柄边饰.png","target":"controls/night/composer-handle.png","preprocess":"white_to_alpha","box":[1420,1840,2420,2015],"visible":true,"padding":6},
+    {"op":"png","id":"composer-divider","source":"night输入区与拖动手柄边饰.png","target":"controls/night/composer-divider.png","preprocess":"white_to_alpha","box":[120,2760,3720,3020],"visible":true,"padding":6},
+    {"op":"atlas","target":"controls/night/composer-ornaments.png","size":[2048,512],"items":[
+      {"ref":"composer-top","box":[70,20,1978,150]}, {"ref":"composer-handle","box":[760,170,1288,330]},
+      {"ref":"composer-divider","box":[70,350,1978,492]}
+    ]},
+    {"op":"png","source":"night空状态记录册徽记.png","target":"ornaments/night/empty-state-journal.png","preprocess":"clean_alpha","visible":true,"padding":8},
+
+    {"op":"png","source":"night默认.png","target":"support/night/hostess-main.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"night聆听.png","target":"support/night/hostess-listening.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"night思考.png","target":"support/night/hostess-thinking.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"night完成.png","target":"support/night/hostess-success.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"night默认.png","target":"support/night/168/hostess-main.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"night聆听.png","target":"support/night/168/hostess-listening.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"night思考.png","target":"support/night/168/hostess-thinking.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"night完成.png","target":"support/night/168/hostess-success.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"night默认.png","target":"support/night/112/hostess-main.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"night聆听.png","target":"support/night/112/hostess-listening.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"night思考.png","target":"support/night/112/hostess-thinking.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"night完成.png","target":"support/night/112/hostess-success.png","preprocess":"clean_alpha","size":[112,112]}
+  ]
+}

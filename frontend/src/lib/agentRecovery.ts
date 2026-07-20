@@ -8,6 +8,9 @@ export interface AgentRecoveryDeps {
   wait?: () => Promise<void>;
 }
 
+/** 首页使用共享的 "home" 标识但只保留临时草稿，不能从后端快照恢复历史。 */
+export const shouldRecoverAgentRun = (threadId: string): boolean => threadId !== "home";
+
 const waitForNextPoll = () => new Promise<void>((resolve) => setTimeout(resolve, 1500));
 
 /** SSE 断开后继续追踪后台 Agent，直到最终快照已经可读。 */

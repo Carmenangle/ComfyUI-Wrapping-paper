@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from app.services import agent_runner, chat_memory, chat_snapshot, rag_store, repo_meta
 from app.services.pathnames import safe_seg
-from app.services.rag_store import EmbedConfig
+from app.services.rag_backend import EmbedConfig
 
 
 class MaintenanceConflict(RuntimeError):

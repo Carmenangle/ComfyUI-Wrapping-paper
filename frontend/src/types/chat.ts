@@ -2,9 +2,11 @@ import type { PortOp } from "../api/ai";
 
 // 图文混排片段：文本/图片穿插渲染
 export interface MsgPart {
-  type: "text" | "image";
+  type: "text" | "image" | "masked-image";
   text?: string;  // type=text
   url?: string;   // type=image（dataURI 或 http URL）
+  image?: string; // type=masked-image 的原图
+  mask?: string;  // type=masked-image 的独立 Alpha 蒙版
 }
 
 export interface PromptApproval {
@@ -33,6 +35,7 @@ export interface AiImageRegeneration {
   kind: "ai-image";
   prompt: string;
   images: string[];
+  imageMask?: { image: string; mask: string };
   size: string;
   quality: "auto" | "low" | "medium" | "high";
   model: {

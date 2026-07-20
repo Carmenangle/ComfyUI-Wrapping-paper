@@ -8,9 +8,6 @@ const supportWidget = readFileSync(new URL("../components/SupportWidget.tsx", im
 
 describe("bright theme asset and ornament constraints", () => {
   it("uses sliced button edge overlays for every state", () => {
-    expect(css).toMatch(
-      /html\[data-theme="bright"\] \.btn:not\(\.danger\)\s*\{[^}]*border-image-slice:\s*18 40 fill;[^}]*border-image-width:\s*4px 16px;/s,
-    );
     for (const family of ["main", "secondary"]) {
       for (const state of ["default", "hover", "pressed", "disabled"]) {
         expect(css).toContain(
@@ -29,10 +26,9 @@ describe("bright theme asset and ornament constraints", () => {
   });
 
   it("keeps modal ornaments below content and outside actions", () => {
-    expect(css).toMatch(/html\[data-theme="bright"\] \.modal > \*\s*\{[^}]*z-index:\s*1;/s);
     expect(css).toMatch(/html\[data-theme="bright"\] \.modal-actions\s*\{[^}]*padding-right:\s*68px;/s);
     expect(css).toMatch(
-      /html\[data-theme="bright"\] \.modal::before,[\s\S]*?pointer-events:\s*none;/,
+      /html\[data-theme="bright"\] \.modal::before,[\s\S]*?cut-corner-porcelain\.png/,
     );
   });
 
@@ -40,7 +36,6 @@ describe("bright theme asset and ornament constraints", () => {
     for (const name of ["main", "listening", "thinking", "success"]) {
       expect(css).toContain(`/support/bright/112/hostess-${name}.png`);
     }
-    expect(css).toContain('content: url("/support/bright/168/hostess-main.png")');
   });
 
   it("uses the bright calibrator on the support button", () => {

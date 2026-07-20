@@ -23,10 +23,17 @@ export interface ChatModel {
 }
 
 // 嵌入模型（知识库 RAG 用）：OpenAI 兼容形式，可填智谱/OpenAI/Ollama 等
+export type EmbeddingMode = "remote" | "local";
+
 export interface EmbedModel {
+  mode: EmbeddingMode;
   apiKey: string;
   baseUrl: string;
   modelName: string;
+  /** 可选：本地嵌入模型目录；远程/Ollama 模式可留空。 */
+  modelDir?: string;
+  /** 可选：本地 Cross-Encoder Reranker 模型目录。 */
+  rerankerDir?: string;
 }
 
 export interface ImageModel {
@@ -68,6 +75,7 @@ export interface Settings {
   workflowDir: string; // 工作流默认读取路径（后端扫描该目录及子目录的 .json）
   outputDir: string; // 输出图片默认存放路径
   comfyuiPath: string; // ComfyUI 本体目录（含 main.py），用于后端启动
+  comfyuiPython: string; // ComfyUI 自己的 Python；禁止使用本工具 Runtime 代替
   comfyuiUrl: string; // ComfyUI 访问地址，iframe 嵌入与 API 调用
   modelsDir: string; // ComfyUI models 目录（模型下载落盘，留空则用 comfyuiPath/models）
   hfToken: string; // HuggingFace token（下载鉴权模型用）
@@ -106,7 +114,7 @@ const KEY = "laf_settings";
 const DEFAULT: Settings = {
   theme: "system",
   chatModels: [],
-  embedModel: { apiKey: "ollama", baseUrl: "http://localhost:11434/v1", modelName: "qwen3-embedding:latest" },
+  embedModel: { mode: "remote", apiKey: "ollama", baseUrl: "http://localhost:11434/v1", modelName: "qwen3-embedding:latest" },
   imageModels: [],
   videoModels: [],
   imageStyle: "",
@@ -114,6 +122,7 @@ const DEFAULT: Settings = {
   workflowDir: "",
   outputDir: "",
   comfyuiPath: "",
+  comfyuiPython: "",
   comfyuiUrl: "http://127.0.0.1:8188",
   modelsDir: "",
   hfToken: "",
@@ -135,6 +144,14 @@ const DEFAULT: Settings = {
 function migrate(s: Record<string, unknown>): Settings {
   const merged = { ...DEFAULT, ...s } as Settings & { chatModel?: ChatModel };
   merged.theme = normalizeTheme(s.theme);
+  const savedEmbed = (s.embedModel || {}) as Partial<EmbedModel>;
+  merged.embedModel = {
+    ...DEFAULT.embedModel,
+    ...savedEmbed,
+    mode: savedEmbed.mode === "local" || savedEmbed.mode === "remote"
+      ? savedEmbed.mode
+      : savedEmbed.modelDir?.trim() ? "local" : "remote",
+  };
   const contextBudgets = normalizeContextBudgets(
     s.contextReminderTokens,
     s.contextMaxTokens,

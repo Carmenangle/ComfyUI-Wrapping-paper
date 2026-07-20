@@ -3,9 +3,8 @@
 # 跑：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-vendor.ps1
 #
 # 为何多版本：编译型包(chromadb/tiktoken 等)的 wheel 与 Python 版本绑定，
-# 只打一个版本的话别的版本用户装不上。这里覆盖 3.8-3.14(win_amd64)。
-# 注意：老版本(3.8)或过新版本(3.14)可能有个别包没现成 wheel，脚本末尾会列出下不全的版本，
-# 那些版本的用户会自动回退联网装(start-dev 里已按版本判断，不会拿别版本 wheel 硬装)。
+# 只打一个版本的话别的版本用户装不上。这里覆盖项目实际支持的 3.10-3.14(win_amd64)。
+# 3.8/3.9 已不满足当前 LangChain/Chroma 依赖的 Python 下限，start-dev 会引导用户使用 3.10+。
 # 为何 --only-binary :all:：离线装必须要现成 wheel；源码包(sdist)在用户机上要现编译，离线环境编不了。
 $ErrorActionPreference = "Stop"
 
@@ -24,7 +23,7 @@ if (-not (Test-Path -LiteralPath $py)) {
 }
 
 # 目标 Python 版本(与 README 声明的支持范围一致)与平台。纯 wheel 包各版本重复下，pip 自动去重同名文件。
-$pyVersions = @("38", "39", "310", "311", "312", "313", "314")
+$pyVersions = @("310", "311", "312", "313", "314")
 $platform = "win_amd64"
 
 New-Item -ItemType Directory -Force -Path $vendorDir | Out-Null
@@ -80,4 +79,3 @@ if ($failed.Count -gt 0) {
   Write-Host "注意：以下 Python 版本有包未下全，这些版本的用户可能仍需联网兜底：$($failed -join ', ')"
 }
 Write-Host "把 vendor/ 一起提交 git，慢速用户 clone 后 start-dev 即可离线装。"
-

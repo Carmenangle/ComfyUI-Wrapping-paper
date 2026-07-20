@@ -13,72 +13,15 @@ import hashlib
 import re
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
 
-from app.config import CHROMA_DIR
-
-
-@dataclass(frozen=True)
-class EmbedConfig:
-    """嵌入接口配置的单一属主：接口地址 + 密钥 + 模型名。
-
-    此前 (base_url, api_key, embed_model) 三元组穿透 rag_store 每个函数签名，
-    收成一个对象后「用了哪套 embedding」只此一处。默认模型与旧位置参一致。
-    """
-    base_url: str = ""
-    api_key: str = ""
-    embed_model: str = "text-embedding-3-small"
-
-
-def _norm_url(base_url: str) -> str:
-    url = (base_url or "").rstrip("/")
-    if not url.endswith("/v1") and "/chat/completions" not in url:
-        url += "/v1"
-    return url
-
-
-class _CompatEmbeddings(Embeddings):
-    """OpenAI 兼容嵌入，直调 /v1/embeddings。
-
-    避开两个坑：1) langchain OpenAIEmbeddings 默认发 encoding_format=base64，
-    Ollama 兼容层不支持；2) trust_env=False 禁用系统代理，避免本地服务请求
-    被代理劫持（表现为空体 502）。对 Ollama / OpenAI / 中转均适用。
-    """
-
-    def __init__(self, base_url: str, api_key: str, model: str):
-        self._url = _norm_url(base_url) + "/embeddings"
-        self._headers = {"Authorization": f"Bearer {api_key or 'not-needed'}"}
-        self._model = model
-
-    def _embed(self, texts: list[str]) -> list[list[float]]:
-        with httpx.Client(trust_env=False, timeout=120) as c:
-            r = c.post(self._url, headers=self._headers,
-                       json={"model": self._model, "input": texts})
-            r.raise_for_status()
-            data = r.json()["data"]
-        # 按 index 排序，确保与输入顺序一致
-        data.sort(key=lambda d: d.get("index", 0))
-        return [d["embedding"] for d in data]
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed(texts)
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embed([text])[0]
-
-
-def _embeddings(base_url: str, api_key: str, model: str = "text-embedding-3-small"):
-    return _CompatEmbeddings(base_url, api_key, model)
+from app.services import rag_backend, rag_retrieval, reranker
+from app.services.rag_backend import EmbedConfig
 
 
 SYSTEM_COLLECTION = "global"  # 系统指令独占库，全局共享
-NODE_INDEX_COLLECTION = "node_index"  # ComfyUI 节点知识库，全局共享（一个节点包=一条）
 
 
 def _repo_collection(repo_id: str) -> str:
@@ -91,27 +34,8 @@ def _repo_collection(repo_id: str) -> str:
     return f"repo_{rid}"
 
 
-# 按 (collection, embed 配置) 缓存单例：避免多客户端读写不一致（新写的条目下次读不到）。
-# 关键：必须带上 embed 配置——否则第一次用空/错 embed 建的坏 store 会被永久复用，
-# 之后正常配置的检索全拿到坏缓存（表现为「知识库为空」，与设置无关，是缓存 bug）。
-_STORE_CACHE: dict[tuple, Chroma] = {}
-
-
-def _store(collection: str, cfg: EmbedConfig) -> Chroma:
-    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    # 同一 collection 复用同一个 Chroma 客户端：不同客户端实例间存在读写一致性延迟，
-    # 会导致刚 index_generation 写入的生成记录、紧接着 list_generations 读不到（要重进才出现）。
-    key = (collection, cfg.base_url, cfg.api_key, cfg.embed_model)
-    cached = _STORE_CACHE.get(key)
-    if cached is not None:
-        return cached
-    store = Chroma(
-        collection_name=collection,
-        embedding_function=_embeddings(cfg.base_url, cfg.api_key, cfg.embed_model),
-        persist_directory=str(CHROMA_DIR),
-    )
-    _STORE_CACHE[key] = store
-    return store
+def _store(collection: str, cfg: EmbedConfig):
+    return rag_backend.store(collection, cfg)
 
 
 def _auto_tags(prompt: str, tags: str) -> list[str]:
@@ -205,6 +129,78 @@ def index_document(repo_id: str, cfg: EmbedConfig,
     return len(chunks)
 
 
+def _context_id(source: str, content: str, metadata: dict) -> str:
+    raw = f"{source}|{metadata.get('kind', '')}|{metadata.get('title', '')}|{content}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _context_item(source: str, content: str, metadata: dict) -> dict:
+    return {
+        "id": _context_id(source, content, metadata),
+        "content": content,
+        "title": metadata.get("title", ""),
+        "kind": metadata.get("kind", "document"),
+        "source": source,
+    }
+
+
+def _context_documents(collection: str, source: str, cfg: EmbedConfig) -> list[dict]:
+    try:
+        data = _store(collection, cfg).get()
+    except Exception:
+        return []
+    documents = data.get("documents", []) or []
+    metadatas = data.get("metadatas", []) or []
+    out = []
+    for index, content in enumerate(documents):
+        metadata = (metadatas[index] if index < len(metadatas) else {}) or {}
+        if metadata.get("kind") == "generation":
+            continue
+        out.append(_context_item(source, content or "", metadata))
+    return out
+
+
+def retrieve_with_trace(repo_id: str, cfg: EmbedConfig,
+                        query: str, k: int = 4) -> list[dict]:
+    """普通知识库 Hybrid 检索，返回可供评估追踪的结构化结果。"""
+    if not query.strip():
+        return []
+    candidate_k = max(k * 4, 12)
+    sources = [
+        (SYSTEM_COLLECTION, "system"),
+        (_repo_collection(repo_id), f"repo:{repo_id or 'home'}"),
+    ]
+    rankings: list[tuple[str, list[dict]]] = []
+    documents: list[dict] = []
+    try:
+        vector = rag_backend.embed_query(cfg, query)
+    except Exception:
+        vector = None
+    for collection, source in sources:
+        documents.extend(_context_documents(collection, source, cfg))
+        if vector is None:
+            continue
+        try:
+            docs = _store(collection, cfg).similarity_search_by_vector(
+                vector, k=candidate_k, filter={"kind": {"$ne": "generation"}},
+            )
+            dense = [
+                _context_item(source, doc.page_content, doc.metadata or {}) for doc in docs
+            ]
+        except Exception:
+            dense = []
+        rankings.append((f"dense:{source}", dense))
+    rankings.append(("bm25", rag_retrieval.sparse_rank(query, documents, candidate_k)))
+    fused = rag_retrieval.rrf_fuse(rankings, candidate_k)
+    if not rag_retrieval.needs_rerank(fused):
+        return fused[:k]
+    reranked = reranker.rerank(
+        query, fused, cfg.reranker_dir, k,
+        instruction="Rank knowledge-base passages by how directly they answer the user's question.",
+    )
+    return reranked or fused[:k]
+
+
 def retrieve(repo_id: str, cfg: EmbedConfig,
              query: str, k: int = 4) -> list[str]:
     """检索与 query 相关的片段（系统库 + 本仓库库合并），返回文本列表。
@@ -212,18 +208,7 @@ def retrieve(repo_id: str, cfg: EmbedConfig,
     会污染对话检索；它们仍留在库里供资产库展示，只是不喂给 AI 检索。
     可复用知识（角色固定特征等）请走知识库手动录入（kind=document）。
     """
-    if not query.strip():
-        return []
-    out: list[str] = []
-    for coll in (SYSTEM_COLLECTION, _repo_collection(repo_id)):
-        try:
-            store = _store(coll, cfg)
-            docs = store.similarity_search(
-                query, k=k, filter={"kind": {"$ne": "generation"}})
-            out.extend(d.page_content for d in docs)
-        except Exception:
-            continue  # 单库检索失败不阻断对话
-    return out
+    return [hit["content"] for hit in retrieve_with_trace(repo_id, cfg, query, k)]
 
 
 def _dump(collection: str, cfg: EmbedConfig) -> list[dict]:
@@ -515,223 +500,3 @@ def seed_system_docs(cfg: EmbedConfig) -> int:
         store.delete(ids=dirty)
         changed += len(dirty)
     return changed
-
-
-# ---- ComfyUI 节点知识库（一个 python_module 包 = 一条，不切段） ----
-
-def index_node_pack(cfg: EmbedConfig, pack_id: str, title: str, content: str,
-                    node_names: list[str], categories: list[str],
-                    python_module: str) -> None:
-    """写入/覆盖一个节点包知识点。pack_id 稳定（用 python_module），供增量更新按 id upsert。"""
-    store = _store(NODE_INDEX_COLLECTION, cfg)
-    meta = {
-        "kind": "node_pack",
-        "id": pack_id,                 # 存 id 供 Hybrid 融合按包去重（dense 结果也能拿到 id）
-        "title": title,
-        "node_names": ",".join(node_names),
-        "categories": ",".join(dict.fromkeys(categories)),
-        "python_module": python_module,
-    }
-    doc = Document(page_content=content, metadata=meta)
-    _BM25_CACHE.clear()  # 索引变了，BM25 缓存作废，下次检索重建
-    # upsert：存在则更新，否则新增（增量同步复用）
-    try:
-        existing = store.get(ids=[pack_id])
-        if existing and existing.get("ids"):
-            store.update_document(pack_id, doc)
-            return
-    except Exception:
-        pass
-    store.add_documents([doc], ids=[pack_id])
-
-
-def list_node_packs(cfg: EmbedConfig) -> list[dict]:
-    """列出节点库全部包。返回 [{id, title, node_names[], categories[], python_module}]。"""
-    try:
-        store = _store(NODE_INDEX_COLLECTION, cfg)
-        data = store.get()
-    except Exception:
-        return []
-    ids = data.get("ids", []) or []
-    metas = data.get("metadatas", []) or []
-    out = []
-    for i, doc_id in enumerate(ids):
-        m = metas[i] or {}
-        out.append({
-            "id": doc_id,
-            "title": m.get("title", ""),
-            "node_names": [n for n in (m.get("node_names", "") or "").split(",") if n],
-            "categories": [c for c in (m.get("categories", "") or "").split(",") if c],
-            "python_module": m.get("python_module", ""),
-        })
-    return out
-
-
-def get_node_pack(cfg: EmbedConfig, pack_id: str) -> dict | None:
-    """读单个节点包（含正文 content，供查看/编辑）。不存在返回 None。"""
-    try:
-        store = _store(NODE_INDEX_COLLECTION, cfg)
-        data = store.get(ids=[pack_id])
-    except Exception:
-        return None
-    ids = data.get("ids", []) or []
-    if not ids:
-        return None
-    m = (data.get("metadatas", []) or [{}])[0] or {}
-    docs = data.get("documents", []) or [""]
-    return {
-        "id": ids[0],
-        "title": m.get("title", ""),
-        "content": docs[0] or "",
-        "node_names": [n for n in (m.get("node_names", "") or "").split(",") if n],
-        "categories": [c for c in (m.get("categories", "") or "").split(",") if c],
-        "python_module": m.get("python_module", ""),
-    }
-
-
-def update_node_pack_content(cfg: EmbedConfig, pack_id: str, content: str) -> bool:
-    """只改某包的正文 content 并重嵌入（保留 meta）。供人工修订用途文本。
-    包不存在返回 False。"""
-    store = _store(NODE_INDEX_COLLECTION, cfg)
-    try:
-        existing = store.get(ids=[pack_id])
-    except Exception:
-        return False
-    if not (existing and existing.get("ids")):
-        return False
-    m = (existing.get("metadatas", []) or [{}])[0] or {}
-    store.update_document(pack_id, Document(page_content=content, metadata=m))
-    _BM25_CACHE.clear()
-    return True
-
-
-import re as _re  # noqa: E402  惰性放在 BM25 段落起始，就近说明用途
-
-# BM25 稀疏索引缓存：key=(collection, base_url, api_key, embed_model)（与 store 同 key，配置变则重建）。
-# 每项 = {"bm25": BM25Okapi, "packs": [pack_dict...]}。全量节点包内容+节点名+标题分词建索引。
-_BM25_CACHE: dict[tuple, dict] = {}
-
-
-def _tokenize(text: str) -> list[str]:
-    """粗分词：字母数字连续段 + 中文单字，全小写。对 'Any Switch (rgthree)' 这类专有名词友好
-    （能切出 any/switch/rgthree 精确 token，BM25 关键词命中）。"""
-    text = (text or "").lower()
-    toks = _re.findall(r"[a-z0-9]+", text)          # 英文/数字词
-    toks += _re.findall(r"[一-鿿]", text)   # 中文按单字
-    return toks
-
-
-def _get_bm25(cfg: EmbedConfig):
-    """构建/取缓存的 BM25 索引（对全部节点包）。返回 (bm25, packs) 或 (None, [])。"""
-    key = (NODE_INDEX_COLLECTION, cfg.base_url, cfg.api_key, cfg.embed_model)
-    cached = _BM25_CACHE.get(key)
-    if cached is not None:
-        return cached["bm25"], cached["packs"]
-    try:
-        from rank_bm25 import BM25Okapi
-    except ImportError:
-        return None, []
-    # 拉全部包（含 content 正文）——list_node_packs 不带 content，这里直接 store.get 全量
-    try:
-        store = _store(NODE_INDEX_COLLECTION, cfg)
-        data = store.get()  # 全量
-    except Exception:
-        return None, []
-    ids = data.get("ids", []) or []
-    metas = data.get("metadatas", []) or []
-    docs = data.get("documents", []) or []
-    packs, corpus = [], []
-    for i, doc_id in enumerate(ids):
-        m = metas[i] or {}
-        content = docs[i] if i < len(docs) else ""
-        node_names = [n for n in (m.get("node_names", "") or "").split(",") if n]
-        pack = {"id": doc_id, "title": m.get("title", ""), "content": content or "",
-                "node_names": node_names, "python_module": m.get("python_module", "")}
-        packs.append(pack)
-        # BM25 文档 = 标题 + 节点名(权重靠重复) + 正文。节点名重复几次以提升专有名词权重。
-        blob = pack["title"] + " " + " ".join(node_names) * 3 + " " + content
-        corpus.append(_tokenize(blob))
-    if not corpus:
-        return None, []
-    bm25 = BM25Okapi(corpus)
-    _BM25_CACHE[key] = {"bm25": bm25, "packs": packs}
-    return bm25, packs
-
-
-def _bm25_search(cfg: EmbedConfig, query: str, k: int) -> list[dict]:
-    """BM25 稀疏检索：按关键词打分取 top-k 包。空/无库返回 []。"""
-    bm25, packs = _get_bm25(cfg)
-    if bm25 is None or not packs:
-        return []
-    toks = _tokenize(query)
-    if not toks:
-        return []
-    scores = bm25.get_scores(toks)
-    ranked = sorted(range(len(packs)), key=lambda i: scores[i], reverse=True)
-    return [packs[i] for i in ranked[:k] if scores[i] > 0]
-
-
-def _rrf_fuse(dense: list[dict], sparse: list[dict], k: int, c: int = 60) -> list[dict]:
-    """RRF 倒数排名融合：只看两榜里的排名不看分数。同一包(按 id)取两榜排名的 1/(c+rank) 之和排序。"""
-    score: dict[str, float] = {}
-    byid: dict[str, dict] = {}
-    for rank, p in enumerate(dense):
-        pid = p.get("id") or p.get("python_module") or p.get("title")
-        score[pid] = score.get(pid, 0.0) + 1.0 / (c + rank)
-        byid[pid] = p
-    for rank, p in enumerate(sparse):
-        pid = p.get("id") or p.get("python_module") or p.get("title")
-        score[pid] = score.get(pid, 0.0) + 1.0 / (c + rank)
-        byid.setdefault(pid, p)
-    order = sorted(score, key=lambda x: score[x], reverse=True)
-    return [byid[pid] for pid in order[:k]]
-
-
-def search_node_packs(cfg: EmbedConfig, query: str, k: int = 8) -> list[dict]:
-    """Hybrid 检索节点包：Dense(向量) + Sparse(BM25 关键词) → RRF 融合 → top-k。
-    治纯向量对专有名词(如 'Any Switch (rgthree)')的召回盲区。返回 [{id,title,content,node_names[],python_module}]。"""
-    # Dense：向量语义召回（多取一些给融合用）
-    dense: list[dict] = []
-    try:
-        store = _store(NODE_INDEX_COLLECTION, cfg)
-        for d in store.similarity_search(query, k=max(k, 12)):
-            m = d.metadata or {}
-            dense.append({
-                "id": m.get("id") or "", "title": m.get("title", ""), "content": d.page_content,
-                "node_names": [n for n in (m.get("node_names", "") or "").split(",") if n],
-                "python_module": m.get("python_module", ""),
-            })
-    except Exception as e:
-        import logging
-        logging.getLogger("uvicorn.error").warning(
-            "search_node_packs dense 失败 base_url=%r model=%r: %s", cfg.base_url, cfg.embed_model, e)
-    # Sparse：BM25 关键词召回
-    sparse = _bm25_search(cfg, query, max(k, 12))
-    # 两条腿都空才算失败
-    if not dense and not sparse:
-        return []
-    # dense 的 metadata 可能没存 id（老数据），用 python_module 兜底做融合键
-    for p in dense:
-        if not p.get("id"):
-            p["id"] = p.get("python_module") or p.get("title")
-    fused = _rrf_fuse(dense, sparse, k)
-    return fused
-
-
-def _search_node_packs_dense_only(cfg: EmbedConfig, query: str, k: int = 8) -> list[dict]:
-    """（保留旧纯向量实现备用，当前不用。）"""
-    try:
-        store = _store(NODE_INDEX_COLLECTION, cfg)
-        hits = store.similarity_search(query, k=k)
-    except Exception:
-        return []
-    out = []
-    for d in hits:
-        m = d.metadata or {}
-        out.append({
-            "title": m.get("title", ""),
-            "content": d.page_content,
-            "node_names": [n for n in (m.get("node_names", "") or "").split(",") if n],
-            "python_module": m.get("python_module", ""),
-        })
-    return out

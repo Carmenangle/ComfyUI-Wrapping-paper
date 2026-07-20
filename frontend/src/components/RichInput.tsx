@@ -8,17 +8,33 @@ import {
 } from "react";
 import { Plus, X } from "lucide-react";
 import { clampSelectionScroll } from "../lib/contextManagement";
+import { classifyClipboardPaste } from "../lib/richPaste";
 
 // 序列化结果：图片在上、文本在下两层。parts 保留兼容（图片在前、文本在后）。
+export interface MaskedImageInput {
+  image: string;
+  mask: string;
+  preview: string;
+}
+
 export interface RichContent {
-  parts: { type: "text" | "image"; text?: string; url?: string }[];
+  parts: {
+    type: "text" | "image" | "masked-image";
+    text?: string;
+    url?: string;
+    image?: string;
+    mask?: string;
+  }[];
   text: string;       // 纯文本（用于指令解析与回显）
   images: string[];   // 所有图片 URL（dataURI/http），按上方栏从左到右顺序
+  maskedImage?: MaskedImageInput;
 }
 
 export interface RichInputHandle {
   insertImage: (url: string) => void;  // 追加一张图片到上方图片栏末尾
+  insertMaskedImage: (value: MaskedImageInput) => void; // 插入原图+独立蒙版绑定附件
   insertText: (text: string) => void;  // 在文本框光标处插入文本
+  replaceContent: (content: RichContent) => void;  // 用一份完整图文内容替换当前草稿
   submit: () => void;                  // 触发提交（外部发送按钮用）
   focus: () => void;
 }
@@ -57,6 +73,7 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
     const taRef = useRef<HTMLTextAreaElement | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);  // 上方 + 按钮的隐藏 file input
     const [images, setImages] = useState<string[]>([]);     // 图片栏：dataURI/URL，左到右
+    const [maskedImage, setMaskedImage] = useState<MaskedImageInput | null>(null);
     const [active, setActive] = useState(0);
     const [closed, setClosed] = useState(false);
     const [curText, setCurText] = useState("");  // 当前纯文本（驱动补全）
@@ -136,11 +153,12 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
 
     // 可提交 = 文本非空 或 有图片。文本或图片任一变化都上报，驱动外部发送按钮启用/禁用。
     useEffect(() => {
-      onCanSubmitChange?.(curText.trim().length > 0 || images.length > 0);
-    }, [curText, images, onCanSubmitChange]);
+      onCanSubmitChange?.(curText.trim().length > 0 || images.length > 0 || !!maskedImage);
+    }, [curText, images, maskedImage, onCanSubmitChange]);
 
     useImperativeHandle(ref, () => ({
       insertImage: (url: string) => addImage(url),
+      insertMaskedImage: (value: MaskedImageInput) => setMaskedImage(value),
       insertText: (text: string) => {
         const ta = taRef.current;
         if (!ta) return;
@@ -150,6 +168,21 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
         setCurText(next);
         onTextChange?.(next);
         requestAnimationFrame(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = s + text.length; });
+      },
+      replaceContent: (content: RichContent) => {
+        const text = content.text || "";
+        setImages([...new Set(content.images.filter(Boolean))]);
+        setMaskedImage(content.maskedImage || null);
+        setCurText(text);
+        setClosed(false);
+        setActive(0);
+        onTextChange?.(text);
+        requestAnimationFrame(() => {
+          const ta = taRef.current;
+          if (!ta) return;
+          ta.focus();
+          ta.selectionStart = ta.selectionEnd = text.length;
+        });
       },
       submit: () => doSubmitRef.current(),
       focus: () => taRef.current?.focus(),
@@ -196,13 +229,25 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
 
     const doSubmit = () => {
       const text = curText.trim();
-      if (!text && images.length === 0) return;
+      if (!text && images.length === 0 && !maskedImage) return;
       const parts: RichContent["parts"] = [
         ...images.map((url) => ({ type: "image" as const, url })),
+        ...(maskedImage ? [{
+          type: "masked-image" as const,
+          url: maskedImage.preview,
+          image: maskedImage.image,
+          mask: maskedImage.mask,
+        }] : []),
         ...(text ? [{ type: "text" as const, text }] : []),
       ];
-      onSubmit({ parts, text, images: [...images] });
+      onSubmit({
+        parts,
+        text,
+        images: [...images],
+        ...(maskedImage ? { maskedImage } : {}),
+      });
       setImages([]);
+      setMaskedImage(null);
       setCurText("");
       onTextChange?.("");
     };
@@ -225,35 +270,24 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
       const imgItem = Array.from(e.clipboardData.items).find(
         (it) => it.type.startsWith("image/"),
       );
-      if (imgItem) {
-        e.preventDefault();
-        const file = imgItem.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = () => addImage(String(reader.result || ""));
-          reader.readAsDataURL(file);
-        }
+      const file = imgItem?.getAsFile() || null;
+      const text = e.clipboardData.getData("text/plain");
+      const intent = classifyClipboardPaste({
+        text,
+        html,
+        hasImageFile: Boolean(file && file.size > 0),
+      });
+      if (intent.kind === "text") return;
+
+      e.preventDefault();
+      if (intent.kind === "image-file") {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => addImage(String(reader.result || ""));
+        reader.readAsDataURL(file);
         return;
       }
-      const text = e.clipboardData.getData("text/plain").trim();
-      // html 里含 <img src>（从对话消息复制的图，text/plain 常是 alt 文本如“图片”）→ 优先提取为图片。
-      // 放在 text 判断之前，避免被 alt 文本带偏粘成文字。
-      if (html) {
-        const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-        if (m && m[1]) { e.preventDefault(); addImage(m[1]); return; }
-      }
-      // 图片/视频直链、本应用媒体地址、dataURI → 作为媒体加入（视频以 <video> 渲染）
-      const looksLikeMediaUrl =
-        /^https?:\/\/\S+\.(png|jpe?g|gif|webp|bmp|mp4|webm|mov|mkv)(\?\S*)?$/i.test(text) ||
-        /\.(png|jpe?g|gif|webp|bmp|mp4|webm|mov|mkv)(\b|\?|&|=)/i.test(text) ||
-        /\/comfyui\/(local-)?view\b/i.test(text) ||
-        /^data:(image|video)\//i.test(text);
-      if (text && looksLikeMediaUrl) {
-        e.preventDefault();
-        addImage(text);
-        return;
-      }
-      // 其余：放行 textarea 默认粘贴（纯文本）
+      addImage(intent.url);
     };
 
 
@@ -321,6 +355,25 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
               </button>
             </span>
           ))}
+          {maskedImage && (
+            <span
+              className="rich-imgbar-item rich-imgbar-masked"
+              onMouseEnter={() => setPreview(maskedImage.preview)}
+              onMouseLeave={() => setPreview(null)}
+              title="原图与蒙版绑定附件"
+            >
+              <img src={maskedImage.preview} alt="蒙版预览" draggable={false} />
+              <span className="rich-imgbar-mask-badge">蒙版</span>
+              <button
+                type="button"
+                className="rich-imgbar-del"
+                title="移除"
+                onClick={() => { setPreview(null); setMaskedImage(null); }}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
         </div>
         {/* 下方纯文本输入 */}
         <textarea
@@ -337,7 +390,7 @@ export const RichInput = forwardRef<RichInputHandle, Props>(
           onScroll={onSelectionScroll}
         />
         {/* 悬停放大预览：独立元素，不占布局。仅当图仍在栏内才显示，防删除后悬空卡住 */}
-        {preview && images.includes(preview) && (
+        {preview && (images.includes(preview) || maskedImage?.preview === preview) && (
           isVideoUrl(preview)
             ? <video className="rich-chip-preview" src={preview} muted autoPlay loop playsInline />
             : <img className="rich-chip-preview" src={preview} alt="预览" />

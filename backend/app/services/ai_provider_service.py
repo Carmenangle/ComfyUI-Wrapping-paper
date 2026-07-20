@@ -13,10 +13,21 @@ def now_iso() -> str:
 
 
 def candidate_model_urls(base_url: str) -> list[str]:
-    normalized = base_url.rstrip("/") + "/"
+    normalized = base_url.rstrip("/")
+    for suffix in (
+        "/chat/completions", "/images/generations", "/images/edits",
+        "/video/generations", "/videos/generations", "/embeddings",
+    ):
+        if normalized.lower().endswith(suffix):
+            normalized = normalized[:-len(suffix)].rstrip("/")
+            break
+    normalized += "/"
     if normalized.rstrip("/").endswith("/v1"):
         return [urljoin(normalized, "models")]
-    return [urljoin(normalized, "v1/models"), urljoin(normalized, "models")]
+    return list(dict.fromkeys([
+        urljoin(normalized, "v1/models"),
+        urljoin(normalized, "models"),
+    ]))
 
 
 def discover_models(base_url: str, api_key: str = "") -> dict[str, object]:

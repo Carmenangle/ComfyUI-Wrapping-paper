@@ -155,6 +155,70 @@ def test_任意尺寸在安全范围内原样发送(monkeypatch):
     assert captured["json"]["size"] == "1536x192"
 
 
+def test_生成请求原样发送用户提示词(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(image_gen.httpx, "Client", _capture_client(captured))
+    original = "保留这段提示词原文，包括16:9与所有构图要求"
+
+    image_gen.generate(
+        "https://img.test/v1", "key", "custom-image-model", original,
+        size="3840x2160",
+    )
+
+    assert captured["json"]["prompt"] == original
+
+
+def test_图生图请求原样发送用户提示词(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(image_gen.httpx, "Client", _capture_client(captured))
+    monkeypatch.setattr(
+        image_gen, "_load_image_bytes",
+        lambda image: (b"png", "image.png", "image/png"),
+    )
+    original = "只按当前文字编辑参考图，不添加系统约束"
+
+    image_gen.generate_with_images(
+        "https://img.test/v1", "key", "custom-image-model", original,
+        ["source"], size="3840x2160",
+    )
+
+    assert captured["data"]["prompt"] == original
+
+
+def test_蒙版编辑分别上传原图与mask字段(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(image_gen.httpx, "Client", _capture_client(captured))
+    monkeypatch.setattr(
+        image_gen, "_load_image_bytes",
+        lambda value: (value.encode(), "image.png", "image/png"),
+    )
+
+    image_gen.generate_with_images(
+        "https://img.test/v1", "key", "gpt-image-2", "修改蒙版区域",
+        ["original"], mask="alpha-mask",
+    )
+
+    assert [field for field, _file in captured["files"]] == ["image[]", "mask"]
+    assert captured["files"][0][1][1] == b"original"
+    assert captured["files"][1][1][1] == b"alpha-mask"
+
+
+@pytest.mark.parametrize(("requested", "expected"), [
+    ("3840x1644", "3840x1648"),
+    ("1672x941", "1680x944"),
+])
+def test_非16倍数尺寸在请求上游前自动对齐(requested, expected, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(image_gen.httpx, "Client", _capture_client(captured))
+
+    image_gen.generate(
+        "https://img.test/v1", "key", "custom-image-model", "prompt",
+        size=requested,
+    )
+
+    assert captured["json"]["size"] == expected
+
+
 @pytest.mark.parametrize("size", ["63x1024", "1024x3841", "bad"])
 def test_非法自定义尺寸在请求上游前拒绝(size, monkeypatch):
     monkeypatch.setattr(

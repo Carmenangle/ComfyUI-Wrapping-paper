@@ -7,7 +7,6 @@
 """
 import json
 import subprocess
-import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -29,30 +28,42 @@ def load_config() -> dict:
     if p.is_file():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            return {"path": data.get("path", ""), "url": data.get("url", COMFYUI_BASE_URL)}
+            return {
+                "path": data.get("path", ""),
+                "url": data.get("url", COMFYUI_BASE_URL),
+                "python_path": data.get("python_path", ""),
+            }
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
             pass
-    return {"path": "", "url": COMFYUI_BASE_URL}
+    return {"path": "", "url": COMFYUI_BASE_URL, "python_path": ""}
 
 
-def save_config(path: str, url: str) -> dict:
+def save_config(path: str, url: str, python_path: str = "") -> dict:
     """保存配置到 data/comfy_config.json（start-dev 脚本据此启动）。"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    cfg = {"path": path, "url": url}
+    cfg = {"path": path, "url": url, "python_path": python_path}
     _config_path().write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return cfg
 
 
-def find_python(base: Path) -> str:
-    """选运行 ComfyUI 的 python：优先整合包同级/内置解释器，否则退回当前解释器。纯函数（只探测文件存在）。"""
+def find_python(base: Path, configured: str = "") -> str | None:
+    """只选择属于 ComfyUI 的解释器；禁止回退到本应用 Runtime。"""
+    if configured.strip():
+        explicit = Path(configured).expanduser()
+        return str(explicit) if explicit.is_file() else None
     for cand in [
+        base / ".venv" / "Scripts" / "python.exe",
+        base / "venv" / "Scripts" / "python.exe",
+        base / ".venv" / "bin" / "python",
+        base / "venv" / "bin" / "python",
+        base.parent / "python_embeded" / "python.exe",
         base.parent / "python" / "python.exe",
         base.parent / "python312" / "python.exe",
         base / "python" / "python.exe",
     ]:
         if cand.is_file():
             return str(cand)
-    return sys.executable
+    return None
 
 
 def write_ext_yaml() -> str:
@@ -77,7 +88,7 @@ class LaunchError(Exception):
         super().__init__(detail)
 
 
-def start(path: str, url: str) -> dict:
+def start(path: str, url: str, python_path: str = "") -> dict:
     """拉起 ComfyUI 子进程。已在运行则不重复启动。失败抛 LaunchError。"""
     global _proc
     if comfyui_client.is_up(url):
@@ -87,7 +98,14 @@ def start(path: str, url: str) -> dict:
     if not (base / "main.py").is_file():
         raise LaunchError(400, f"未找到 main.py：{base / 'main.py'}")
 
-    py = find_python(base)
+    py = find_python(base, python_path)
+    if py is None:
+        detail = (
+            f"配置的 ComfyUI Python 不存在：{python_path}"
+            if python_path.strip()
+            else "未找到 ComfyUI 独立 Python；请在设置中填写 ComfyUI Python 路径"
+        )
+        raise LaunchError(400, detail)
     try:
         _proc = subprocess.Popen(
             [py, "main.py", "--extra-model-paths-config", write_ext_yaml(), "--enable-cors-header", "*"],
@@ -146,8 +164,8 @@ def stop(url: str = COMFYUI_BASE_URL) -> dict:
     return {"stopped": False, "message": f"未发现监听 {port} 的 ComfyUI 进程（可能已关闭）"}
 
 
-def restart(path: str, url: str, wait_seconds: float = 1.5) -> dict:
+def restart(path: str, url: str, python_path: str = "", wait_seconds: float = 1.5) -> dict:
     """关闭后等待端口释放，再按相同配置启动。"""
     stop(url)
     time.sleep(wait_seconds)
-    return start(path, url)
+    return start(path, url, python_path)

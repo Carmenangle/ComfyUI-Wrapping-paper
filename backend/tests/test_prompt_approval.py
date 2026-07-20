@@ -274,3 +274,27 @@ def test_风格改写提示词必须声明保留全部细节(monkeypatch):
     assert out == "改写稿"
     assert "不得删除" in captured["system"]
     assert "不得改变" in captured["system"]
+
+
+def test_蒙版图生图把独立mask传给生成接口(monkeypatch):
+    captured = {}
+    ctx = {**_ctx(), "image_mask": {"image": "original.png", "mask": "mask.png"}}
+    monkeypatch.setattr(
+        approval_flow.image_gen,
+        "generate_with_images",
+        lambda *args, **kwargs: captured.update({"images": args[4], **kwargs}) or "result.png",
+    )
+    monkeypatch.setattr(approval_flow.generation_store, "persist_image", lambda *args, **kwargs: {
+        "id": "masked-result", "url": "result.png", "regeneration": args[-1],
+    })
+
+    result = ag.img2img_node({
+        "_ctx": ctx,
+        "user_text": "只修改蒙版区域",
+        "images": ["original.png"],
+        "trace": [],
+    })
+
+    assert captured["images"] == ["original.png"]
+    assert captured["mask"] == "mask.png"
+    assert result["image_recs"][0]["regeneration"]["imageMask"] == ctx["image_mask"]

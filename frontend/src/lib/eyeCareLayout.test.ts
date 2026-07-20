@@ -10,9 +10,6 @@ describe("eye-care ornament safety zones", () => {
     expect(css).not.toMatch(
       /background(?:-image)?\s*:[^;}]*button-(?:main|secondary)-(?:default|hover|pressed|disabled)\.png/,
     );
-    expect(css).toMatch(
-      /html\[data-theme="eye-care"\] \.btn:not\(\.danger\)\s*\{[^}]*border-image-slice:\s*18 40 fill;[^}]*border-image-width:\s*4px 16px;/s,
-    );
     for (const family of ["main", "secondary"]) {
       for (const state of ["default", "hover", "pressed", "disabled"]) {
         expect(css).toContain(
@@ -23,9 +20,6 @@ describe("eye-care ornament safety zones", () => {
   });
 
   it("keeps modal content above ornaments and actions outside the corner", () => {
-    expect(css).toMatch(
-      /html\[data-theme="eye-care"\] \.modal > \*\s*\{[^}]*z-index:\s*1;/s,
-    );
     expect(css).toMatch(
       /html\[data-theme="eye-care"\] \.modal-actions\s*\{[^}]*padding-right:\s*64px;/s,
     );

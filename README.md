@@ -4,6 +4,8 @@
 
 ## 环境要求
 
+普通用户优先下载 GitHub Release 的固定 Runtime 包，不需要安装 Python、Node.js 或项目依赖。以下环境要求只适用于源码开发版。
+
 | 项 | 要求 | 说明 |
 |---|---|---|
 | **Python** | **3.10 – 3.12（强烈推荐）** | 项目自带的离线依赖（`vendor/pip`）只完整覆盖 **3.10–3.14**。用这个区间的版本 clone 后可**纯离线装齐**，无需联网。 |
@@ -15,6 +17,24 @@
 
 ## 快速开始
 
+### 固定 Runtime（推荐）
+
+按系统选择发布资产：
+
+| 系统 | 标准版 | 完整 RAG 版 |
+|---|---|---|
+| Windows x64 | `windows-x64-standard` | `windows-x64-full-rag`（NVIDIA CUDA） |
+| macOS Apple Silicon | `macos-arm64-standard` | `macos-arm64-full-rag`（MPS） |
+| macOS Intel | `macos-x64-standard` | 不提供，CPU Reranker 不进入交互精排 |
+
+标准版支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版额外内置 Qwen3-Reranker-0.6B、SentenceTransformers 和对应平台 Torch。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS），应用会打开 `http://127.0.0.1:8010`。
+
+本工具 Runtime 与 ComfyUI 的 Python 完全分离。设置中的“ComfyUI Python”可留空自动识别整合包或 `.venv/venv`；自定义安装位置需填写其解释器路径。工具不会使用自己的 Python 启动 ComfyUI。提交工作流前会释放本地 Reranker 显存，避免与 ComfyUI 采样同时占用 GPU/MPS。
+
+完整 RAG 包超过 GitHub 单文件限制时会带 `.parts.json` 和多个 `.partNN`。下载同一 Release 的合并工具后，Windows 执行 `powershell -File .\join-runtime.ps1 -Manifest <清单>`，macOS 执行 `sh ./join-runtime.sh <清单>`；两者都会流式合并并校验 SHA256。
+
+### 源码开发
+
 双击根目录 `start-dev.bat` 一键启动（后台拉起前后端 + ComfyUI，并打开浏览器）；`stop-dev.bat` 停止。
 
 手动启动：
@@ -24,6 +44,8 @@
 cd D:\tool\ComfyUI\ComfyUI-Wrapping-paper\backend
 python -m venv .venv; .\.venv\Scripts\activate
 pip install -r requirements.txt
+# 使用本地 Transformers Embedding 或 Cross-Encoder Reranker 时再安装：
+pip install -r requirements-reranker.txt
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8010 --reload-dir app
 
 # 前端
@@ -39,6 +61,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 | 前端 | http://127.0.0.1:5173 |
 | 后端 API | http://127.0.0.1:8010/api |
 | ComfyUI | http://127.0.0.1:8188 |
+
+固定 Runtime 的前端和后端同在 `http://127.0.0.1:8010`；源码开发时前端仍使用 5173。
 
 ## 首次配置
 

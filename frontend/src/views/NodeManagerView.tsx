@@ -68,7 +68,7 @@ export function NodeManagerView({ initialSearch = "", onSearchConsumed }: {
     const label = running ? "重启" : "启动";
     setBusy(`正在${label} ComfyUI（先关后起，首次较慢）…`);
     try {
-      await restartComfy(settings.comfyuiPath, url);
+      await restartComfy(settings.comfyuiPath, url, settings.comfyuiPython);
     } catch (e) {
       setBusy(`${label}失败：${(e as Error).message}`);
       return;

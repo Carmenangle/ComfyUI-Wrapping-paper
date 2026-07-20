@@ -1,4 +1,5 @@
 import type { FinalizedMessage } from "../api/comfyui";
+import type { ChatStreamEvent } from "../api/chatStreamProtocol";
 import type { ChatMessage, PromptApproval, RegenerationSnapshot, RouteChoice } from "../types/chat";
 
 export function upsertMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
@@ -73,4 +74,37 @@ export function applyRouteChoice(
       ? { ...message, routeChoice }
       : message,
   );
+}
+
+export function reduceChatStreamEvent(
+  current: ChatMessage[],
+  botId: string,
+  event: ChatStreamEvent,
+): ChatMessage[] {
+  switch (event.type) {
+    case "trace":
+      return current.map((message) => message.id === botId
+        ? { ...message, text: message.text + `${event.text}\n` }
+        : message);
+    case "delta":
+      return current.map((message) => message.id === botId
+        ? { ...message, text: message.text + event.text }
+        : message);
+    case "image":
+      return upsertMessages(current, [agentImageMessage(event.url, event.id, event.regeneration)]);
+    case "video":
+      return upsertMessages(current, [agentVideoMessage(event.url, event.id)]);
+    case "inspiration":
+      return upsertMessages(current, [inspirationMessage(event.card)]);
+    case "approval":
+      return applyPromptApproval(current, event.approval);
+    case "route_choice":
+      return applyRouteChoice(current, event.choice);
+    case "error":
+      return current.map((message) => message.id === botId
+        ? { ...message, text: message.text || `对话失败：${event.message}` }
+        : message);
+    case "interrupted":
+      return current;
+  }
 }

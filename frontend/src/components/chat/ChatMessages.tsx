@@ -1,8 +1,9 @@
 import { memo, useState } from "react";
-import { Bot, Check, ChevronDown, CornerDownRight, Download, ExternalLink, Image as ImageIcon, Images, MessageCircle, Pencil, Play, Plus, RefreshCw, RotateCw, ScanText, Search, Send, Sparkles, Video, Workflow, Wrench, X } from "lucide-react";
+import { Bot, Brush, Check, ChevronDown, CornerDownRight, Download, ExternalLink, Image as ImageIcon, Images, MessageCircle, Pencil, Play, Plus, RotateCw, ScanText, Search, Send, Sparkles, Video, Workflow, Wrench, X } from "lucide-react";
 import type { AgentRoute, ChatMessage, PromptApproval, RouteChoice } from "../../types/chat";
 import type { AssistantAvatarState } from "../../lib/assistantAvatar";
 import type { PortOp } from "../../api/ai";
+import type { RichContent } from "../RichInput";
 import { CopyButton } from "../CopyButton";
 import { openLightbox } from "../Lightbox";
 
@@ -83,7 +84,46 @@ export function userMessagePlainText(msg: ChatMessage): string {
     .join("");
 }
 
-function UserMessageBase({ msg, onAddToChat }: { msg: ChatMessage; onAddToChat?: (url: string) => void }) {
+export function userMessageRichContent(msg: ChatMessage): RichContent {
+  const text = userMessagePlainText(msg);
+  const images = (msg.parts || [])
+    .filter((part) => part.type === "image" && part.url)
+    .map((part) => part.url!);
+  if (msg.image && !images.includes(msg.image)) images.push(msg.image);
+  const maskedPart = (msg.parts || []).find(
+    (part) => part.type === "masked-image" && part.image && part.mask && part.url,
+  );
+  const maskedImage = maskedPart ? {
+    image: maskedPart.image!,
+    mask: maskedPart.mask!,
+    preview: maskedPart.url!,
+  } : undefined;
+  return {
+    text,
+    images,
+    parts: [
+      ...images.map((url) => ({ type: "image" as const, url })),
+      ...(maskedImage ? [{
+        type: "masked-image" as const,
+        url: maskedImage.preview,
+        image: maskedImage.image,
+        mask: maskedImage.mask,
+      }] : []),
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ],
+    ...(maskedImage ? { maskedImage } : {}),
+  };
+}
+
+function UserMessageBase({
+  msg,
+  onAddToChat,
+  onEdit,
+}: {
+  msg: ChatMessage;
+  onAddToChat?: (url: string) => void;
+  onEdit?: (content: RichContent) => void;
+}) {
   const plainText = userMessagePlainText(msg);
   return (
     <div className="msg-user">
@@ -91,8 +131,12 @@ function UserMessageBase({ msg, onAddToChat }: { msg: ChatMessage; onAddToChat?:
         <div className="user-message-text">
           {msg.parts && msg.parts.length > 0 ? (
             msg.parts.map((p, i) =>
-              p.type === "image" && p.url ? (
-                <ImageChip key={`img-${p.url}`} url={p.url} onAddToChat={onAddToChat} />
+              (p.type === "image" || p.type === "masked-image") && p.url ? (
+                <ImageChip
+                  key={`img-${p.url}`}
+                  url={p.url}
+                  onAddToChat={p.type === "image" ? onAddToChat : undefined}
+                />
               ) : (
                 <span key={`text-${i}-${(p.text || "").slice(0, 20)}`}>{p.text}</span>
               ),
@@ -103,6 +147,17 @@ function UserMessageBase({ msg, onAddToChat }: { msg: ChatMessage; onAddToChat?:
         </div>
         <div className="user-message-actions">
           <CopyButton text={plainText} className="user-copy-btn" label="复制纯文本" />
+          {onEdit && (
+            <button
+              type="button"
+              className="user-edit-btn"
+              title="复制图文内容到输入框编辑"
+              aria-label="编辑此消息"
+              onClick={() => onEdit(userMessageRichContent(msg))}
+            >
+              <Pencil size={13} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -234,7 +289,7 @@ export function RouteChoiceCard({
   );
 }
 
-function AssistantMessageBase({ msg, streaming, avatarState = "default", onSendImage, onRefineImage, onRunCommand, onSetCover, onPromptApproval, onRouteChoice, onRegenerate, regenerating = false }: { msg: ChatMessage; streaming?: boolean; avatarState?: AssistantAvatarState; onSendImage: (url: string) => void; onRefineImage?: (url: string) => void; onRunCommand?: (cmd: string) => void; onSetCover?: (url: string) => void; onPromptApproval?: (approval: PromptApproval, action: "submit" | "change" | "cancel", editedPrompt?: string) => Promise<void>; onRouteChoice?: (choice: RouteChoice, route: AgentRoute) => Promise<void>; onRegenerate?: (messageId: string) => void; regenerating?: boolean }) {
+function AssistantMessageBase({ msg, streaming, avatarState = "default", onSendImage, onMaskImage, onRunCommand, onSetCover, onPromptApproval, onRouteChoice, onRegenerate, regenerating = false }: { msg: ChatMessage; streaming?: boolean; avatarState?: AssistantAvatarState; onSendImage: (url: string) => void; onMaskImage?: (url: string) => void; onRunCommand?: (cmd: string) => void; onSetCover?: (url: string) => void; onPromptApproval?: (approval: PromptApproval, action: "submit" | "change" | "cancel", editedPrompt?: string) => Promise<void>; onRouteChoice?: (choice: RouteChoice, route: AgentRoute) => Promise<void>; onRegenerate?: (messageId: string) => void; regenerating?: boolean }) {
   const [showThinking, setShowThinking] = useState(false);
   // 正文来源：有 parts 用其文本块拼接（历史恢复走 parts），否则用 msg.text
   const rawText = msg.parts && msg.parts.length > 0
@@ -287,7 +342,7 @@ function AssistantMessageBase({ msg, streaming, avatarState = "default", onSendI
               >
                 <RotateCw size={14} /> {regenerating ? "重新生成中…" : "重新生图"}
               </button>
-              <button className="img-tool" onClick={() => onRefineImage?.(url)}><RefreshCw size={14} /> 识图微调</button>
+              <button className="img-tool" onClick={() => onMaskImage?.(url)}><Brush size={14} /> 蒙化修改</button>
               <button className="img-tool" onClick={() => onSendImage(url)}>
                 <Send size={14} /> 发送至对话
               </button>

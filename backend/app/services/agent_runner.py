@@ -54,7 +54,7 @@ def run_multi_stream(context: RunContext) -> "queue.Queue":
                 generation_store.persist_route_choice(context.thread_id, route_choice)
             try:
                 chat_memory.append_turn(
-                    context.thread_id, context.message, context.images,
+                    context.thread_id, context.message, context.input_images(),
                     text, interrupted=interrupted,
                 )
             except Exception:

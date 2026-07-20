@@ -271,10 +271,15 @@ def img2img_node(state: AgentState) -> dict:
         return {"result_text": "未找到参考图，无法图生图。", "trace": trace}
     if (ctx.get("style_template") or "").strip():
         candidate = _styled_prompt(ctx, execution_prompt)
-        result = generation_approval.save_prompt_review(ctx, "img2img", original, candidate, imgs, "style")
+        result = generation_approval.save_prompt_review(
+            ctx, "img2img", original, candidate, imgs, "style", ctx.get("image_mask"),
+        )
         result["trace"] = trace + result["trace"]
         return result
-    return generation_approval.execute_generation(ctx, "img2img", original, execution_prompt, imgs, trace)
+    return generation_approval.execute_generation(
+        ctx, "img2img", original, execution_prompt, imgs, trace,
+        image_mask=ctx.get("image_mask"),
+    )
 
 
 def analyze_node(state: AgentState) -> dict:
@@ -479,7 +484,7 @@ def stream_multi_agent(context: RunContext) -> Iterator[dict]:
         return
     ctx = context
     message = context.message
-    images = context.images
+    images = context.input_images()
     from langchain_core.messages import HumanMessage
     content: list = [{"type": "text", "text": message}]
     for u in (images or []):

@@ -8,6 +8,7 @@ import {
   Archive,
   Palette,
   PanelRight,
+  Pencil,
   RefreshCw,
   Send,
   Sparkles,
@@ -19,13 +20,14 @@ import {
 import { type Repo } from "../stores/repos";
 import { modelDisplayName, useSettings } from "../stores/settings";
 import { KnowledgeModal } from "../components/KnowledgeModal";
-import { RichInput, type RichInputHandle } from "../components/RichInput";
+import { RichInput, type RichContent, type RichInputHandle } from "../components/RichInput";
 import { WorkflowCard } from "../components/WorkflowCard";
 import { useChatSession } from "../lib/useChatSession";
 import { ConfirmModal } from "../components/Modal";
+import { MaskEditorModal, type MaskEditorResult } from "../components/MaskEditorModal";
 import { StylePresetModal } from "../components/StylePresetModal";
 import { UserMessage, AssistantMessage, InspirationCard, PortsPlanCard } from "../components/chat/ChatMessages";
-import { ModelSwitcher, SizeSwitcher, ChatEmptyLanding } from "../components/chat/ChatControls";
+import { ModelSwitcher, SizeSwitcher } from "../components/chat/ChatControls";
 import { comfyStatus, startComfy, localViewUrl } from "../api/comfyui";
 import { listAgents, type Agent } from "../api/agents";
 import { listTemplates, type Template } from "../api/workflows";
@@ -80,6 +82,7 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialImage]);
   const [hasText, setHasText] = useState(false);  // 输入框是否有可发送内容（文本或图片，驱动发送按钮）
+  const [maskEditorUrl, setMaskEditorUrl] = useState<string | null>(null);
   // 对话线 id = 仓库 id（首页用 "home"）：后端按此落盘多轮记忆与 RAG 知识库
   const threadId = repo?.id || "home";
 
@@ -201,14 +204,18 @@ export function ChatView({
   repoIdRef.current = repo?.id;
 
   const handleAddToChat = useCallback((url: string) => richRef.current?.insertImage(url), []);
+  const handleEditMessage = useCallback((content: RichContent) => {
+    richRef.current?.replaceContent(content);
+  }, []);
   const handleSendImage = useCallback((url: string) => {
     richRef.current?.insertImage(url);
     richRef.current?.focus();
   }, []);
-  const handleRefineImage = useCallback((url: string) => {
-    richRef.current?.insertText("参考这张图，反推它的提示词后按我的要求改图：");
-    richRef.current?.insertImage(url);
+  const handleMaskImage = useCallback((url: string) => setMaskEditorUrl(url), []);
+  const handleMaskComplete = useCallback((result: MaskEditorResult) => {
+    richRef.current?.insertMaskedImage(result);
     richRef.current?.focus();
+    setMaskEditorUrl(null);
   }, []);
   const handleRunCommand = useCallback((cmd: string) => runCommandRef.current(cmd), []);
   const handleRegenerate = useCallback(
@@ -304,7 +311,9 @@ export function ChatView({
     }
     setComfyMsg("正在启动 ComfyUI（首次较慢）…");
     try {
-      const r = await startComfy(settings.comfyuiPath, settings.comfyuiUrl);
+      const r = await startComfy(
+        settings.comfyuiPath, settings.comfyuiUrl, settings.comfyuiPython,
+      );
       setComfyMsg(r.message);
     } catch (e) {
       setComfyMsg(`启动失败：${(e as Error).message}`);
@@ -391,11 +400,10 @@ export function ChatView({
                 }}
               />
             )}
-            {messages.length === 0 && <ChatEmptyLanding />}
             {messages.map((m) => (
               <div className="chat-message-anchor" data-message-id={m.id} key={m.id}>
               {m.role === "user" ? (
-                <UserMessage msg={m} onAddToChat={handleAddToChat} />
+                <UserMessage msg={m} onAddToChat={handleAddToChat} onEdit={handleEditMessage} />
               ) : m.workflow ? (
                 <WorkflowCard
                   msg={m}
@@ -429,7 +437,7 @@ export function ChatView({
                   avatarState={assistantAvatarState(m, m.id === streamingId)}
                   onRunCommand={handleRunCommand}
                   onSendImage={handleSendImage}
-                  onRefineImage={handleRefineImage}
+                  onMaskImage={handleMaskImage}
                   onSetCover={hasRepo ? handleSetCover : undefined}
                   onPromptApproval={actOnPromptApproval}
                   onRouteChoice={actOnRouteChoice}
@@ -441,6 +449,14 @@ export function ChatView({
               </div>
             ))}
           </div>
+
+          {maskEditorUrl && (
+            <MaskEditorModal
+              imageUrl={maskEditorUrl}
+              onCancel={() => setMaskEditorUrl(null)}
+              onComplete={handleMaskComplete}
+            />
+          )}
 
           <div className="chat-input-wrap">
             {contextReminder && (
@@ -580,6 +596,17 @@ export function ChatView({
                   onClick={() => guideQueued(q.id)}
                 >
                   <CornerDownRight size={13} /> 引导
+                </button>
+                <button
+                  className="queue-row-edit"
+                  title="移回输入框编辑"
+                  aria-label="编辑排队消息"
+                  onClick={() => {
+                    richRef.current?.replaceContent(q.content);
+                    cancelQueued(q.id);
+                  }}
+                >
+                  <Pencil size={13} />
                 </button>
                 <button className="queue-row-del" title="删除这条排队消息" onClick={() => cancelQueued(q.id)}>
                   <Trash2 size={13} />

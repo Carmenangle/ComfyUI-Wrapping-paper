@@ -13,10 +13,12 @@ $comfyExtYaml = Join-Path $backendDir "data\comfy_extra_paths.yaml"
 $comfyExtSrc = Join-Path $projectRoot "comfyui-ext"
 
 $comfyDir = ""
+$comfyPythonPath = ""
 if (Test-Path -LiteralPath $comfyConfigFile) {
   try {
     $cfg = Get-Content -LiteralPath $comfyConfigFile -Raw -Encoding utf8 | ConvertFrom-Json
     if ($cfg.path) { $comfyDir = $cfg.path }
+    if ($cfg.python_path) { $comfyPythonPath = $cfg.python_path }
   } catch { }
 }
 
@@ -51,12 +53,15 @@ function Wait-HttpOk([string]$Url, [int]$Seconds) {
 # 返回值：>=0 = 可达；-1 = 连不上/失败。
 # 为何用 curl 而非 .NET(HttpWebRequest/HttpClient)：.NET 的 TLS 栈在部分机器上与某些镜像源(如清华)
 # 握手失败(SendFailure)误判为连不上；Windows 10/11 自带 curl.exe 的 TLS 兼容性好，与 pip 实际下载一致。
-function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 4) {
+function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 4, [bool]$Direct = $false) {
   try {
     $curl = "$env:SystemRoot\System32\curl.exe"
     if (-not (Test-Path -LiteralPath $curl)) { $curl = "curl" }  # 老系统回退 PATH 里的 curl
     # --max-time 到点后 curl 主动截断(退出码 28)，但 %{speed_download} 已算好这段的平均字节/秒
-    $out = & $curl -s -o (Join-Path $env:TEMP "laf_probe.tmp") -w "%{http_code} %{speed_download}" --max-time $Seconds $Url 2>$null
+    $curlArgs = @("-s", "-o", (Join-Path $env:TEMP "laf_probe.tmp"), "-w", "%{http_code} %{speed_download}", "--max-time", $Seconds)
+    if ($Direct) { $curlArgs += @("--noproxy", "*") }
+    $curlArgs += $Url
+    $out = & $curl @curlArgs 2>$null
     $parts = ($out -split '\s+') | Where-Object { $_ -ne "" }
     if ($parts.Count -lt 2) { return -1 }
     $code = [int]($parts[0])
@@ -69,9 +74,9 @@ function Measure-MirrorSpeed([string]$Url, [int]$Seconds = 4) {
 }
 
 # 用国内镜像装依赖：临时彻底清空代理(环境变量 + NO_PROXY=*)再装，装完恢复。
-# 为何要清环境变量：仅 --proxy "" 不够——urllib3 仍会读 HTTP(S)_PROXY 环境变量或系统代理，
-# 走翻墙代理连国内源会把 HTTPS 切断(SSLEOF)。清空环境变量 + NO_PROXY=* 才真正直连。
-# $backendPython 为全局；$reqPath 由调用方传入。返回 $true/$false（是否成功）。
+# 为何要清环境变量：pip/urllib3 会读 HTTP(S)_PROXY 环境变量或系统代理，走翻墙代理连接
+# 国内源可能被切断。PowerShell 又无法可靠传递空的 --proxy 参数，因此使用环境清理 + NO_PROXY=*。
+# $backendPython 为全局；返回 $true/$false（是否成功）。
 function Install-FromMirror([string]$IndexUrl, [string]$TrustedHost) {
   $saved = @{}
   foreach ($v in 'HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy') {
@@ -81,7 +86,9 @@ function Install-FromMirror([string]$IndexUrl, [string]$TrustedHost) {
   $savedNo = $env:NO_PROXY
   $env:NO_PROXY = "*"
   try {
-    & $backendPython -m pip install --proxy "" -i $IndexUrl --trusted-host $TrustedHost -r requirements.txt
+    # PowerShell 调用原生命令时会丢弃空字符串，不能传 `--proxy ""`，否则 --proxy 会吞掉后续参数。
+    # --isolated 忽略用户 pip.ini 与 PIP_* 环境变量；代理由上面的环境清理和 NO_PROXY=* 禁用。
+    & $backendPython -m pip install --isolated -i $IndexUrl --trusted-host $TrustedHost -r requirements.txt
     return ($LASTEXITCODE -eq 0)
   } finally {
     foreach ($v in $saved.Keys) { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
@@ -151,14 +158,14 @@ if ($savedHash -ne $reqHash) {
     # 测出的是突发峰值(曾虚高到 600KB/s 实际只 25KB/s)；大文件走存储回源才是真实持续吞吐。
     $probeRel = "packages/3f/6b/5610004206cf7f8e7ad91c5a85a8c71b2f2f8051a0c0c4d5916b76d6cbb2/numpy-1.26.4-cp311-cp311-win_amd64.whl"
     $mirrors = @(
-      @{ name = "默认源(PyPI)"; url = ""; probe = "https://files.pythonhosted.org/$probeRel" },
-      @{ name = "阿里云";       url = "https://mirrors.aliyun.com/pypi/simple/";        probe = "https://mirrors.aliyun.com/pypi/$probeRel" },
-      @{ name = "清华源";       url = "https://pypi.tuna.tsinghua.edu.cn/simple/";       probe = "https://pypi.tuna.tsinghua.edu.cn/$probeRel" }
+      @{ name = "默认源(PyPI)"; url = ""; probe = "https://files.pythonhosted.org/$probeRel"; direct = $false },
+      @{ name = "阿里云";       url = "https://mirrors.aliyun.com/pypi/simple/";        probe = "https://mirrors.aliyun.com/pypi/$probeRel"; direct = $true },
+      @{ name = "清华源";       url = "https://pypi.tuna.tsinghua.edu.cn/simple/";       probe = "https://pypi.tuna.tsinghua.edu.cn/$probeRel"; direct = $true }
     )
     $SLOW = 100  # KB/s 阈值：低于此视为慢源
     Write-Host "测速各下载源(每个约 4 秒)..."
     foreach ($m in $mirrors) {
-      $m.speed = Measure-MirrorSpeed $m.probe 4
+      $m.speed = Measure-MirrorSpeed $m.probe 4 $m.direct
       $tag = if ($m.speed -lt 0) { "连不上" } elseif ($m.speed -lt $SLOW) { "慢" } else { "快" }
       Write-Host ("  {0}: {1} KB/s ({2})" -f $m.name, $m.speed, $tag)
     }
@@ -261,19 +268,30 @@ if (Test-ComfyRunning) {
   $extPosix = $comfyExtSrc -replace '\\', '/'
   "laf_ext:`n  custom_nodes: $extPosix`n" | Set-Content -LiteralPath $comfyExtYaml -Encoding utf8
 
-  # 优先用整合包内置 python
+  # ComfyUI 必须使用自己的解释器，禁止回退到本工具后端 Python。
   $comfyPy = $null
-  foreach ($cand in @(
-    (Join-Path (Split-Path -Parent $comfyDir) "python\python.exe"),
-    (Join-Path (Split-Path -Parent $comfyDir) "python312\python.exe"),
-    (Join-Path $comfyDir "python\python.exe")
-  )) {
-    if (Test-Path -LiteralPath $cand) { $comfyPy = $cand; break }
+  if ($comfyPythonPath) {
+    if (Test-Path -LiteralPath $comfyPythonPath) { $comfyPy = $comfyPythonPath }
+    else { Write-Host "Configured ComfyUI Python not found: $comfyPythonPath" }
+  } else {
+    foreach ($cand in @(
+      (Join-Path $comfyDir ".venv\Scripts\python.exe"),
+      (Join-Path $comfyDir "venv\Scripts\python.exe"),
+      (Join-Path (Split-Path -Parent $comfyDir) "python_embeded\python.exe"),
+      (Join-Path (Split-Path -Parent $comfyDir) "python\python.exe"),
+      (Join-Path (Split-Path -Parent $comfyDir) "python312\python.exe"),
+      (Join-Path $comfyDir "python\python.exe")
+    )) {
+      if (Test-Path -LiteralPath $cand) { $comfyPy = $cand; break }
+    }
   }
-  if (-not $comfyPy) { $comfyPy = "python" }
 
-  Write-Host "Starting ComfyUI on http://127.0.0.1:8188 (with lock extension)"
-  Start-Process -FilePath $comfyPy -ArgumentList @("main.py", "--extra-model-paths-config", $comfyExtYaml, "--enable-cors-header", "*", "--auto-launch") -WorkingDirectory $comfyDir | Out-Null
+  if (-not $comfyPy) {
+    Write-Host "ComfyUI Python not found. Set it under Settings -> Paths; app Runtime will not be reused."
+  } else {
+    Write-Host "Starting ComfyUI on http://127.0.0.1:8188 (with lock extension)"
+    Start-Process -FilePath $comfyPy -ArgumentList @("main.py", "--extra-model-paths-config", $comfyExtYaml, "--enable-cors-header", "*", "--auto-launch") -WorkingDirectory $comfyDir | Out-Null
+  }
 }
 
 Write-Host "Waiting for backend..."

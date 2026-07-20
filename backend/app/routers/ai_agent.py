@@ -12,10 +12,16 @@ from app.services.sse import sse_response
 router = APIRouter()
 
 
+class ImageMaskRequest(BaseModel):
+    image: str
+    mask: str
+
+
 class ImageAgentRequest(EmbedModelReq):
     thread_id: str = "home"            # 对话线 = 仓库 id
     message: str = ""                  # 本轮用户输入
     images: list[str] = []             # 随文图片（data URI 或 URL）
+    image_mask: ImageMaskRequest | None = None  # 原图与独立 Alpha 蒙版
     gen_base_url: str = ""             # 生图模型（imageModels）
     gen_api_key: str = ""
     gen_model: str = ""
@@ -55,13 +61,14 @@ def multi_agent(req: MultiAgentRequest) -> StreamingResponse:
     from app.services import agent_runner
     from app.services.agent_contracts import ModelConfig, RunContext
 
-    if not req.message.strip() and not req.images:
+    if not req.message.strip() and not req.images and not req.image_mask:
         raise HTTPException(status_code=400, detail="内容为空")
 
     context = RunContext(
         thread_id=req.thread_id,
         message=req.message,
         images=req.images or [],
+        image_mask=req.image_mask.model_dump() if req.image_mask else None,
         chat=ModelConfig(req.base_url, req.api_key, req.model),
         generation=ModelConfig(req.gen_base_url, req.gen_api_key, req.gen_model),
         video=ModelConfig(req.video_base_url, req.video_api_key, req.video_model),
@@ -94,6 +101,7 @@ class RegenerateImageRequest(BaseModel):
     repo_id: str
     prompt: str
     images: list[str] = []
+    image_mask: ImageMaskRequest | None = None
     gen_base_url: str
     gen_api_key: str
     gen_model: str
@@ -112,14 +120,21 @@ def regenerate_image(req: RegenerateImageRequest) -> dict[str, object]:
 
     regeneration = {
         "kind": "ai-image", "prompt": req.prompt, "images": list(req.images),
+        **({"imageMask": req.image_mask.model_dump()} if req.image_mask else {}),
         "size": req.size, "quality": req.image_quality,
         "model": {"baseUrl": req.gen_base_url, "modelName": req.gen_model},
     }
     try:
-        if req.images:
+        if req.images or req.image_mask:
+            images = list(req.images)
+            if req.image_mask and req.image_mask.image not in images:
+                images.insert(0, req.image_mask.image)
+            kwargs = {"size": req.size, "quality": req.image_quality}
+            if req.image_mask:
+                kwargs["mask"] = req.image_mask.mask
             url = image_gen.generate_with_images(
                 req.gen_base_url, req.gen_api_key, req.gen_model,
-                req.prompt, req.images, size=req.size, quality=req.image_quality,
+                req.prompt, images, **kwargs,
             )
         else:
             url = image_gen.generate(

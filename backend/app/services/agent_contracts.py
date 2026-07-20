@@ -17,6 +17,7 @@ class RunContext:
     thread_id: str
     message: str
     images: list[str] = field(default_factory=list)
+    image_mask: dict[str, str] | None = None
     chat: ModelConfig = field(default_factory=ModelConfig)
     generation: ModelConfig = field(default_factory=ModelConfig)
     video: ModelConfig = field(default_factory=ModelConfig)
@@ -42,9 +43,17 @@ class RunContext:
     skill_frags: list[str] = field(default_factory=list, compare=False)
     has_mcp: bool = False
 
+    def input_images(self) -> list[str]:
+        images = list(self.images)
+        source = (self.image_mask or {}).get("image", "")
+        if source and source not in images:
+            images.insert(0, source)
+        return images
+
     def _legacy(self) -> dict:
         return {
             "thread_id": self.thread_id, "repo_id": self.repo_id or self.thread_id,
+            "image_mask": self.image_mask,
             "chat_base": self.chat.base_url, "chat_key": self.chat.api_key, "chat_model": self.chat.model,
             "gen_base": self.generation.base_url, "gen_key": self.generation.api_key, "gen_model": self.generation.model,
             "vid_base": self.video.base_url, "vid_key": self.video.api_key, "vid_model": self.video.model,
@@ -69,6 +78,8 @@ class RunContext:
 
 
 class AgentEvent(TypedDict, total=False):
+    """Agent 图内部领域事件；跨 HTTP 前必须由 chat_stream_protocol 编码。"""
+
     trace: str
     delta: str
     image: str

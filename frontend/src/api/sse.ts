@@ -3,7 +3,7 @@
 // 现在统一走这里，调用方只给请求体和 onEvent（认识自己关心的字段）。
 //
 // wire 格式（与后端 sse_response 对齐）：每个事件一行 `data: <json>\n\n`，
-// 收尾一行 `data: [DONE]`。事件对象含 {delta} / {image,image_id} / {inspiration} / {error} 等。
+// 收尾一行 `data: [DONE]`。payload 语义由 chatStreamProtocol 的版本化协议拥有。
 
 import { apiUrl } from "./client";
 
@@ -47,7 +47,6 @@ export function openSSE(
           if (data === "[DONE]") { onDone(); return; }
           let obj: Record<string, unknown>;
           try { obj = JSON.parse(data); } catch { continue; }  // 半包/脏行忽略
-          if (obj.error) { onDone(String(obj.error)); return; }
           if (onEvent(obj) === "stop") { onDone(); return; }
         }
       }

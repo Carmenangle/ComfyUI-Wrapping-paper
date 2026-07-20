@@ -6,6 +6,7 @@ import json
 import pytest
 
 from app.services import workflow_builder as wb
+from app.routers import ai_workflow_builder as build_routes
 
 
 # —— 打桩：一套极简自洽的节点体系（validate_graph 完全基于传入 object_info）——
@@ -22,7 +23,11 @@ def _stub_deps(monkeypatch):
     # 检索恒有结果（避免走「知识库为空」的 ValueError 分支）
     monkeypatch.setattr(wb.node_index, "search",
                         lambda cfg, need, k=10: [{"content": "pack", "node_names": ["Save"]}])
-    monkeypatch.setattr(wb.comfyui_client, "fetch_object_info", lambda url: _OBJECT_INFO)
+    monkeypatch.setattr(
+        wb.workflow_build_turn.node_candidates.comfyui_client,
+        "fetch_object_info",
+        lambda url: _OBJECT_INFO,
+    )
     monkeypatch.setattr(wb.node_index, "suggest_alternatives", lambda *a, **k: {})
 
 
@@ -41,7 +46,7 @@ def _chat_returning(*replies):
 
 
 def _cfg():
-    from app.services.rag_store import EmbedConfig
+    from app.services.rag_backend import EmbedConfig
     return EmbedConfig("http://embed", "k", "m")
 
 
@@ -90,16 +95,65 @@ def test_build_graph_empty_need_raises():
                        current_graph={}, save=False)
 
 
-def test_build_graph_empty_search_raises(monkeypatch):
+def test_build_graph_empty_search_uses_object_info(monkeypatch):
     monkeypatch.setattr(wb.node_index, "search", lambda cfg, need, k=10: [])
-    with pytest.raises(ValueError):
-        wb.build_graph(_chat_returning("{}"), base_url="b", api_key="k", model="m",
-                       proxy="", cfg=_cfg(), need="出图", comfy_url="c",
-                       workflow_dir="d", name="n", max_retries=2,
-                       current_graph={}, save=False)
+    out = wb.build_graph(_chat_returning(json.dumps(_VALID_GRAPH)), base_url="b", api_key="k", model="m",
+                         proxy="", cfg=_cfg(), need="出图", comfy_url="c",
+                         workflow_dir="d", name="n", max_retries=2,
+                         current_graph={}, save=False)
+    assert out["ok"] is True
+
+
+def test_candidate_resolution_checks_inventory_before_rag(monkeypatch):
+    calls = []
+    oi = {
+        "UNETLoader": {"display_name": "UNET 加载器", "category": "loaders"},
+        "VAELoader": {"display_name": "VAE 加载器", "category": "loaders"},
+    }
+    monkeypatch.setattr(wb.workflow_build_turn.node_candidates.comfyui_client, "fetch_object_info",
+                        lambda _url: calls.append("inventory") or oi)
+    monkeypatch.setattr(wb.node_index, "search",
+                        lambda *_args, **_kwargs: calls.append("rag") or [])
+
+    resolved = wb.workflow_build_turn.node_candidates.resolve(_cfg(), "Anima 模型", "c")
+
+    assert calls == ["inventory", "rag"]
+    assert "UNETLoader" in resolved.names
+    assert "VAELoader" in resolved.names
+
+
+def test_build_plan_only_calls_chat_model_once():
+    calls = []
+
+    def chat_fn(*args, **kwargs):
+        calls.append((args, kwargs))
+        return "方案"
+
+    out = wb.build_plan(
+        chat_fn, base_url="b", api_key="k", model="m", proxy="",
+        cfg=_cfg(), need="Anima 出图", comfy_url="c", current_graph={},
+    )
+
+    assert out == {"plan": "方案"}
+    assert len(calls) == 1
+    assert "不能据此断言本机未安装" in calls[0][0][3]
+    assert "1200 个中文字符以内" in calls[0][0][3]
+    assert "【安装状态事实】ComfyUI object_info 共返回 2 个节点" in calls[0][0][4]
 
 
 # ============ build_direct ============
+
+
+def test_build_route_chat_adapter_disables_hidden_transport_retries(monkeypatch):
+    seen = {}
+
+    def fake_chat(*args, **kwargs):
+        seen.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(build_routes, "chat", fake_chat)
+    assert build_routes._build_chat("b", "k", "m", "s", "u") == "ok"
+    assert seen["retries"] == 1
 
 def test_build_direct_single_call_success():
     chat_fn = _chat_returning(json.dumps(_VALID_GRAPH))
@@ -108,6 +162,24 @@ def test_build_direct_single_call_success():
     assert out["ok"] is True
     assert out["graph"] == _VALID_GRAPH
     assert chat_fn.calls["n"] == 1                     # 直连只调一次
+
+
+def test_build_direct_includes_build_conversation_history():
+    seen = {}
+
+    def chat_fn(base_url, api_key, model, system, convo, temperature=0.2, proxy=""):
+        seen["convo"] = convo
+        return json.dumps(_VALID_GRAPH)
+
+    out = wb.build_direct(chat_fn, base_url="b", api_key="k", model="m", proxy="",
+                          cfg=_cfg(), need="继续搭建", comfy_url="c", current_graph={},
+                          history=[
+                              {"role": "user", "text": "之前方案用 WD14 反推"},
+                              {"role": "assistant", "text": "我会使用 WD14"},
+                              {"role": "user", "text": "改用本机 llama 反推"},
+                          ])
+    assert out["ok"] is True
+    assert "改用本机 llama 反推" in seen["convo"]
 
 
 def test_build_direct_at_most_two_calls():

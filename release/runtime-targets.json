@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "python_version": "3.13.11",
+  "pyinstaller_version": "6.21.0",
+  "reranker": {
+    "repo_id": "Qwen/Qwen3-Reranker-0.6B",
+    "revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+    "directory": "Qwen3-Reranker-0.6B"
+  },
+  "targets": [
+    {
+      "id": "windows-x64-standard",
+      "os": "windows",
+      "arch": "x64",
+      "edition": "standard",
+      "runner": "windows-2025",
+      "accelerator": "none"
+    },
+    {
+      "id": "windows-x64-full-rag",
+      "os": "windows",
+      "arch": "x64",
+      "edition": "full-rag",
+      "runner": "windows-2025",
+      "accelerator": "cuda",
+      "torch_version": "2.13.0+cu130",
+      "torch_index_url": "https://download.pytorch.org/whl/cu130"
+    },
+    {
+      "id": "macos-arm64-standard",
+      "os": "macos",
+      "arch": "arm64",
+      "edition": "standard",
+      "runner": "macos-15",
+      "accelerator": "none"
+    },
+    {
+      "id": "macos-arm64-full-rag",
+      "os": "macos",
+      "arch": "arm64",
+      "edition": "full-rag",
+      "runner": "macos-15",
+      "accelerator": "mps",
+      "torch_version": "2.13.0"
+    },
+    {
+      "id": "macos-x64-standard",
+      "os": "macos",
+      "arch": "x64",
+      "edition": "standard",
+      "runner": "macos-15-intel",
+      "accelerator": "none"
+    }
+  ]
+}

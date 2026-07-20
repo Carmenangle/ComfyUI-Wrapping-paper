@@ -38,4 +38,20 @@ describe("generation lifecycle", () => {
     expect(reduce(running, { t: "stop" }).queue).toEqual([item]);
     expect(reduce(running, { t: "reset" })).toEqual(initialGenState);
   });
+
+  it("removes only the queue item returned to the composer for editing", () => {
+    const second = {
+      id: "q2",
+      text: "带图修改",
+      content: {
+        text: "带图修改",
+        images: ["image.png"],
+        parts: [{ type: "image" as const, url: "image.png" }, { type: "text" as const, text: "带图修改" }],
+      },
+    };
+    const queued = reduce(reduce(initialGenState, { t: "enqueue", item }), { t: "enqueue", item: second });
+
+    expect(reduce(queued, { t: "removeQueued", id: second.id }).queue).toEqual([item]);
+    expect(second.content.images).toEqual(["image.png"]);
+  });
 });

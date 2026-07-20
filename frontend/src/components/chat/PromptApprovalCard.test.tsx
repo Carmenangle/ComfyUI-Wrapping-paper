@@ -5,6 +5,7 @@ import {
   PromptApprovalCard,
   RouteChoiceCard,
   UserMessage,
+  userMessageRichContent,
   userMessagePlainText,
 } from "./ChatMessages";
 
@@ -147,7 +148,7 @@ describe("RouteChoiceCard", () => {
 describe("generated image actions", () => {
   const requiredProps = {
     onSendImage: () => {},
-    onRefineImage: () => {},
+    onMaskImage: () => {},
   };
 
   it("replaces copy link with an enabled regenerate action for bound results", () => {
@@ -173,6 +174,8 @@ describe("generated image actions", () => {
     );
 
     expect(html).toContain("重新生图");
+    expect(html).toContain("蒙化修改");
+    expect(html).not.toContain("识图微调");
     expect(html).not.toContain("复制链接");
     expect(html).not.toContain("disabled=\"\"");
   });
@@ -190,6 +193,7 @@ describe("generated image actions", () => {
     expect(html).toContain("disabled=\"\"");
     expect(html).toContain("旧结果未保存完整生成参数");
   });
+
 });
 
 describe("user message actions", () => {
@@ -233,5 +237,58 @@ describe("user message actions", () => {
         { type: "text", text: "第二段" },
       ],
     })).toBe("第一段第二段");
+  });
+
+  it("restores text and every image when editing a historical user message", () => {
+    const message = {
+      id: "editable",
+      role: "user" as const,
+      text: "完整要求",
+      parts: [
+        { type: "image" as const, url: "image-1.png" },
+        { type: "image" as const, url: "image-2.png" },
+        { type: "text" as const, text: "完整要求" },
+      ],
+    };
+    const html = renderToStaticMarkup(<UserMessage msg={message} onEdit={() => {}} />);
+
+    expect(html).toContain('aria-label="编辑此消息"');
+    expect(html.indexOf("复制纯文本")).toBeLessThan(html.indexOf("编辑此消息"));
+    expect(userMessageRichContent(message)).toEqual({
+      text: "完整要求",
+      images: ["image-1.png", "image-2.png"],
+      parts: [
+        { type: "image", url: "image-1.png" },
+        { type: "image", url: "image-2.png" },
+        { type: "text", text: "完整要求" },
+      ],
+    });
+  });
+
+  it("restores a masked image as one bound editor attachment", () => {
+    const message = {
+      id: "masked-editable",
+      role: "user" as const,
+      text: "只修改选区",
+      parts: [
+        {
+          type: "masked-image" as const,
+          url: "preview.png",
+          image: "original.png",
+          mask: "mask.png",
+        },
+        { type: "text" as const, text: "只修改选区" },
+      ],
+    };
+
+    expect(userMessageRichContent(message)).toMatchObject({
+      text: "只修改选区",
+      images: [],
+      maskedImage: {
+        image: "original.png",
+        mask: "mask.png",
+        preview: "preview.png",
+      },
+    });
   });
 });

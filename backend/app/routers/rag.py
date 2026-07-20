@@ -2,11 +2,13 @@
 
 接口地址/密钥/模型由前端从「设置 → 对话模型」透传（与 /api/ai/chat 一致）。
 """
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services import rag_store
-from app.services.rag_store import EmbedConfig
+from app.services.rag_backend import EmbedConfig
 
 router = APIRouter()
 
@@ -16,9 +18,19 @@ class _EmbedFields(BaseModel):
     base_url: str = ""
     api_key: str = ""
     embed_model: str = "text-embedding-3-small"
+    embed_mode: Literal["remote", "local"] = "remote"
+    embed_model_dir: str = ""
+    reranker_model_dir: str = ""
 
     def embed_cfg(self) -> EmbedConfig:
-        return EmbedConfig(self.base_url, self.api_key, self.embed_model)
+        return EmbedConfig(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            embed_model=self.embed_model,
+            model_dir=self.embed_model_dir,
+            reranker_dir=self.reranker_model_dir,
+            mode=self.embed_mode,
+        )
 
 
 class IndexGenRequest(_EmbedFields):

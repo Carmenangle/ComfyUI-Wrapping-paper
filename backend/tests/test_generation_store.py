@@ -70,6 +70,7 @@ def test_agent_remote_image_uses_standard_time_name(tmp_path, monkeypatch):
     names = [path.name for path in repo.iterdir()]
     assert len(names) == 1
     assert re.fullmatch(r"\d{8}_\d{6}_\d{6}_[0-9a-f]{8}\.png", names[0])
+    assert (repo / names[0]).read_bytes() == b"png"
 
 
 def test_supervisor_route_choice_is_persisted_on_its_message(monkeypatch):

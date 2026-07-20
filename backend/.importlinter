@@ -1,5 +1,5 @@
-; 架构护栏：把 docs/ARCHITECTURE.md 的准入规则 #2 变成可执行门禁。
-; 跑：cd backend && .venv/Scripts/python -m importlinter.cli lint  （或 lint-imports）
+; 架构护栏：把根目录 ARCHITECTURE.md 的依赖规则变成可执行门禁。
+; 跑：cd backend && $env:PYTHONUTF8=1; .venv/Scripts/lint-imports
 [importlinter]
 root_package = app
 
@@ -18,3 +18,27 @@ layers =
     app.services.agent_runner
     app.services.thread_admission | app.services.agent_contracts
 
+[importlinter:contract:rag-stack-layers]
+name = RAG 栈方向：编排依赖检索与存储，向量后端不得反向依赖
+type = layers
+layers =
+    app.services.node_index | app.services.rag_store
+    app.services.node_store | app.services.rag_retrieval | app.services.reranker
+    app.services.rag_backend
+
+[importlinter:contract:workflow-build-stack-layers]
+name = 搭建栈方向：编排依赖搭建回合与图规则，底层不得反向依赖
+type = layers
+layers =
+    app.services.workflow_builder
+    app.services.workflow_build_turn | app.services.workflow_graph_rules | app.services.workflow_merge
+    app.services.node_candidates
+    app.services.node_index
+    app.services.rag_middleware
+
+[importlinter:contract:chat-stream-protocol-layers]
+name = 对话流协议方向：SSE Adapter 依赖 wire 协议，协议不得反向依赖
+type = layers
+layers =
+    app.services.sse
+    app.services.chat_stream_protocol

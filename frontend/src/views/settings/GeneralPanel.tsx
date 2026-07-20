@@ -11,9 +11,9 @@ export interface PanelProps {
 }
 
 const THEMES: { value: Exclude<Theme, "system">; label: string; description: string; colors: string[] }[] = [
-  { value: "bright", label: "明亮", description: "日光瓷白与矢车菊蓝", colors: ["#f8f7fa", "#647dcb"] },
-  { value: "night", label: "夜间", description: "深灰与柔白", colors: ["#1a1a1a", "#e5e5e5"] },
-  { value: "eye-care", label: "护眼", description: "暖米黄与橄榄金", colors: ["#f4efe0", "#a98a3c"] },
+  { value: "bright", label: "瓷白矢车菊", description: "瓷白与矢车菊蓝", colors: ["#f8f7fa", "#647dcb"] },
+  { value: "night", label: "乌青暗金", description: "乌青黑与低亮暗金", colors: ["#1B2523", "#B49552"] },
+  { value: "eye-care", label: "象牙鼠尾草", description: "暖象牙与鼠尾草绿", colors: ["#FAF7EA", "#6F7F5D"] },
   { value: "green", label: "绿色", description: "浅绿与深绿", colors: ["#e9f5e9", "#395932"] },
   { value: "gray", label: "灰色", description: "冷浅灰与蓝灰", colors: ["#f3f4f6", "#394050"] },
   { value: "high-contrast", label: "高对比", description: "纯黑与纯白", colors: ["#000000", "#ffffff"] },
@@ -79,7 +79,7 @@ export function GeneralPanel({ draft, setDraft }: PanelProps) {
           aria-pressed={draft.theme === "system"}
         >
           <Monitor size={16} />
-          <span><strong>跟随系统</strong><small>系统亮色使用明亮，暗色使用夜间</small></span>
+          <span><strong>跟随系统</strong><small>系统亮色使用瓷白矢车菊，暗色使用乌青暗金</small></span>
         </button>
       </div>
 

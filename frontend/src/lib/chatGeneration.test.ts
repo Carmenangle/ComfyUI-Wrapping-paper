@@ -121,6 +121,27 @@ describe("slimSnapshot", () => {
     expect(out[0].regeneration?.kind).toBe("ai-image");
     expect((out[0].regeneration as any).images).toEqual(["local://x"]);
   });
+  it("蒙版附件与重生成参数中的原图和mask一起落盘", async () => {
+    const data = "data:image/png;base64,AAAA";
+    const msgs: ChatMessage[] = [{
+      id: "masked", role: "user", text: "修改",
+      parts: [{ type: "masked-image", url: data, image: data, mask: data }],
+      regeneration: {
+        kind: "ai-image", prompt: "修改", images: [data], imageMask: { image: data, mask: data },
+        size: "1024x1024", quality: "high",
+        model: { baseUrl: "https://example.test/v1", modelName: "image" },
+      },
+    }];
+
+    const out = await slimSnapshot(msgs, persist);
+
+    expect(out[0].parts?.[0]).toMatchObject({
+      type: "masked-image", url: "local://x", image: "local://x", mask: "local://x",
+    });
+    expect((out[0].regeneration as any).imageMask).toEqual({
+      image: "local://x", mask: "local://x",
+    });
+  });
 });
 
 describe("pending generation", () => {

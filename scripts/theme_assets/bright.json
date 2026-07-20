@@ -1,0 +1,66 @@
+{
+  "theme": "bright",
+  "steps": [
+    {"op":"webp","source":"bright瓷白斜纹无缝纹理.png","target":"textures/bright/porcelain-twill-tile.webp","mode":"mirror_tile","lossless":true},
+    {"op":"webp","source":"bright石墨弹力织物无缝纹理.png","target":"textures/bright/graphite-stretch-twill-tile.webp","mode":"mirror_tile","lossless":true},
+    {"op":"webp","source":"bright日光校准工作室对话背景.png","target":"backgrounds/bright/chat-daylight-calibration-studio.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"bright极简斜裁工作台对话背景.png","target":"backgrounds/bright/chat-diagonal-workbench.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"bright蓝紫双针压线条.png","target":"textures/bright/double-stitch-strip.webp","mode":"crop_resize","preprocess":"clean_alpha","box":[0,360,-1,660],"visible":true,"padding":0,"size":[1536,192],"lossless":true},
+
+    {"op":"png","id":"cut-atlas","source":"bright不对称切角图集.png","target":"ornaments/bright/cut-corners.png","preprocess":"clean_alpha","size":[2048,2048]},
+    {"op":"png","id":"cut-porcelain","source":"bright不对称切角图集.png","target":"ornaments/bright/cut-corner-porcelain.png","preprocess":"clean_alpha","box":[240,120,620,410],"visible":true,"padding":4},
+    {"op":"png","id":"cut-graphite","source":"bright不对称切角图集.png","target":"ornaments/bright/cut-corner-graphite.png","preprocess":"clean_alpha","box":[780,120,1140,410],"visible":true,"padding":4},
+    {"op":"png","id":"cut-node","source":"bright不对称切角图集.png","target":"ornaments/bright/cut-corner-node.png","preprocess":"clean_alpha","box":[240,565,620,885],"visible":true,"padding":4},
+    {"op":"png","id":"cut-silver","source":"bright不对称切角图集.png","target":"ornaments/bright/cut-corner-silver.png","preprocess":"clean_alpha","box":[780,565,1140,885],"visible":true,"padding":4},
+
+    {"op":"png","id":"divider-single","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/divider-single.png","preprocess":"clean_alpha","box":[20,130,1450,160],"visible":true,"padding":4},
+    {"op":"png","id":"divider-double","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/divider-double.png","preprocess":"clean_alpha","box":[20,245,1450,300],"visible":true,"padding":4},
+    {"op":"png","id":"divider-node","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/divider-node.png","preprocess":"clean_alpha","box":[20,375,1450,425],"visible":true,"padding":4},
+    {"op":"png","id":"divider-graphite","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/divider-graphite.png","preprocess":"clean_alpha","box":[20,490,1450,550],"visible":true,"padding":4},
+    {"op":"png","id":"divider-porcelain","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/divider-porcelain.png","preprocess":"clean_alpha","box":[20,620,1450,675],"visible":true,"padding":4},
+    {"op":"png","id":"node-default","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/node-default.png","preprocess":"clean_alpha","box":[330,770,460,885],"visible":true,"padding":4},
+    {"op":"png","id":"node-active","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/node-active.png","preprocess":"clean_alpha","box":[500,770,635,885],"visible":true,"padding":4},
+    {"op":"png","id":"node-success","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/node-success.png","preprocess":"clean_alpha","box":[680,770,815,885],"visible":true,"padding":4},
+    {"op":"png","id":"node-warning","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/node-warning.png","preprocess":"clean_alpha","box":[850,770,985,885],"visible":true,"padding":4},
+    {"op":"png","id":"node-error","source":"bright分隔线与状态节点图集.png","target":"ornaments/bright/node-error.png","preprocess":"clean_alpha","box":[1025,770,1160,885],"visible":true,"padding":4},
+    {"op":"atlas","target":"ornaments/bright/dividers-and-nodes.png","size":[2048,1024],"items":[
+      {"ref":"divider-single","box":[50,24,1998,124]}, {"ref":"divider-double","box":[50,154,1998,254]},
+      {"ref":"divider-node","box":[50,284,1998,384]}, {"ref":"divider-graphite","box":[50,414,1998,514]},
+      {"ref":"divider-porcelain","box":[50,544,1998,644]}, {"ref":"node-default","box":[460,770,600,960]},
+      {"ref":"node-active","box":[690,770,830,960]}, {"ref":"node-success","box":[920,770,1060,960]},
+      {"ref":"node-warning","box":[1150,770,1290,960]}, {"ref":"node-error","box":[1380,770,1520,960]}
+    ]},
+
+    {"op":"png","id":"button-main-default","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-main-default.png","preprocess":"clean_alpha","box":[18,18,438,145],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-hover","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-main-hover.png","preprocess":"clean_alpha","box":[18,185,438,320],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-pressed","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-main-pressed.png","preprocess":"clean_alpha","box":[18,355,438,487],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-disabled","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-main-disabled.png","preprocess":"clean_alpha","box":[18,525,438,657],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-default","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-secondary-default.png","preprocess":"clean_alpha","box":[486,18,906,145],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-hover","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-secondary-hover.png","preprocess":"clean_alpha","box":[486,185,906,320],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-pressed","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-secondary-pressed.png","preprocess":"clean_alpha","box":[486,355,906,487],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-disabled","source":"bright按钮状态纹理图集.png","target":"controls/bright/button-secondary-disabled.png","preprocess":"clean_alpha","box":[486,525,906,657],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"atlas","target":"controls/bright/button-state-overlays.png","size":[2048,1024],"items":[
+      {"ref":"button-main-default","box":[16,32,496,480]}, {"ref":"button-main-hover","box":[528,32,1008,480]},
+      {"ref":"button-main-pressed","box":[1040,32,1520,480]}, {"ref":"button-main-disabled","box":[1552,32,2032,480]},
+      {"ref":"button-secondary-default","box":[16,544,496,992]}, {"ref":"button-secondary-hover","box":[528,544,1008,992]},
+      {"ref":"button-secondary-pressed","box":[1040,544,1520,992]}, {"ref":"button-secondary-disabled","box":[1552,544,2032,992]}
+    ]},
+
+    {"op":"png","id":"message-assistant","source":"bright消息气泡纹理图集.png","target":"controls/bright/message-assistant.png","preprocess":"clean_alpha","box":[125,40,900,440],"visible":true,"padding":2},
+    {"op":"png","id":"message-user","source":"bright消息气泡纹理图集.png","target":"controls/bright/message-user.png","preprocess":"clean_alpha","box":[125,490,900,920],"visible":true,"padding":2},
+    {"op":"png","id":"message-system","source":"bright消息气泡纹理图集.png","target":"controls/bright/message-system.png","preprocess":"clean_alpha","box":[125,980,900,1450],"visible":true,"padding":2},
+    {"op":"atlas","target":"controls/bright/message-surface-overlays.png","size":[2048,1024],"items":[
+      {"ref":"message-assistant","box":[24,38,658,986]}, {"ref":"message-user","box":[706,38,1340,986]},
+      {"ref":"message-system","box":[1388,38,2022,986]}
+    ]},
+
+    {"op":"png","id":"composer-top","source":"bright输入区与拖动手柄边饰.png","target":"controls/bright/composer-top.png","preprocess":"clean_alpha","box":[45,155,995,210],"visible":true,"padding":4},
+    {"op":"png","id":"composer-handle","source":"bright输入区与拖动手柄边饰.png","target":"controls/bright/composer-handle.png","preprocess":"clean_alpha","box":[285,400,745,490],"visible":true,"padding":4},
+    {"op":"png","id":"composer-divider","source":"bright输入区与拖动手柄边饰.png","target":"controls/bright/composer-divider.png","preprocess":"clean_alpha","box":[50,675,980,740],"visible":true,"padding":4},
+    {"op":"atlas","target":"controls/bright/composer-ornaments.png","size":[2048,512],"items":[
+      {"ref":"composer-top","box":[70,20,1978,150]}, {"ref":"composer-handle","box":[760,170,1288,330]},
+      {"ref":"composer-divider","box":[70,350,1978,492]}
+    ]},
+    {"op":"png","source":"bright空状态校准徽记.png","target":"ornaments/bright/empty-state-calibrator.png","preprocess":"clean_alpha","size":[1024,1024]}
+  ]
+}

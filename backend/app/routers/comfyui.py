@@ -23,6 +23,7 @@ def list_comfyui() -> dict[str, object]:
 class StartRequest(BaseModel):
     path: str          # ComfyUI 目录（含 main.py）
     url: str = COMFYUI_BASE_URL
+    python_path: str = ""
 
 
 @router.get("/status")
@@ -33,6 +34,7 @@ def status(url: str = COMFYUI_BASE_URL) -> dict[str, object]:
 class ComfyConfig(BaseModel):
     path: str = ""
     url: str = COMFYUI_BASE_URL
+    python_path: str = ""
 
 
 @router.get("/config")
@@ -44,13 +46,13 @@ def get_config() -> ComfyConfig:
 @router.post("/config")
 def set_config(cfg: ComfyConfig) -> ComfyConfig:
     """保存 ComfyUI 路径/地址，落盘到 data/comfy_config.json（ps1 脚本据此启动）。"""
-    return ComfyConfig(**comfy_launcher.save_config(cfg.path, cfg.url))
+    return ComfyConfig(**comfy_launcher.save_config(cfg.path, cfg.url, cfg.python_path))
 
 
 @router.post("/start")
 def start(req: StartRequest) -> dict[str, object]:
     try:
-        return comfy_launcher.start(req.path, req.url)
+        return comfy_launcher.start(req.path, req.url, req.python_path)
     except LaunchError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 
@@ -65,7 +67,7 @@ def stop(req: StartRequest) -> dict[str, object]:
 def restart(req: StartRequest) -> dict[str, object]:
     """重启 ComfyUI：先关再起（装完插件生效）。需提供 path 以重新拉起。"""
     try:
-        return comfy_launcher.restart(req.path, req.url)
+        return comfy_launcher.restart(req.path, req.url, req.python_path)
     except LaunchError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 

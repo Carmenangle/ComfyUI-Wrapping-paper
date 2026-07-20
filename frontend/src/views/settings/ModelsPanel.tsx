@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, ListChecks, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ListChecks, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import type { PanelProps } from "./GeneralPanel";
 import {
   modelDisplayName,
@@ -7,6 +7,7 @@ import {
 } from "../../stores/settings";
 import { discoverProviderModels } from "../../api/aiProviders";
 import { filterModelNames } from "../../lib/modelSearch";
+import { probeModel, type ModelProbeKind, type ModelProbeResult } from "../../api/modelProbe";
 
 // 嵌入模型快捷预设
 const EMBED_PRESETS = [
@@ -15,8 +16,9 @@ const EMBED_PRESETS = [
 ];
 
 // 一张「模型卡」：名称/Key/URL + 「读取模型列表」按钮（调 discover-models 拉列表供选）
-function ModelCard({ model, onChange, onRemove, customSizeSupported, onCustomSizeSupport }: {
+function ModelCard({ model, kind, onChange, onRemove, customSizeSupported, onCustomSizeSupport }: {
   model: { id?: string; displayName?: string; apiKey: string; baseUrl: string; modelName: string };
+  kind: Exclude<ModelProbeKind, "embedding-local" | "reranker-local">;
   onChange: (patch: Partial<ChatModel>) => void;
   onRemove: () => void;
   customSizeSupported?: boolean;
@@ -26,6 +28,7 @@ function ModelCard({ model, onChange, onRemove, customSizeSupported, onCustomSiz
   const [modelQuery, setModelQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [probe, setProbe] = useState<{ testing?: boolean; result?: ModelProbeResult }>({});
 
   const discover = async () => {
     if (!model.baseUrl) { setErr("请先填 API URL"); return; }
@@ -44,6 +47,21 @@ function ModelCard({ model, onChange, onRemove, customSizeSupported, onCustomSiz
     }
   };
   const filteredModels = filterModelNames(models, modelQuery);
+
+  const test = async () => {
+    setProbe({ testing: true });
+    try {
+      const result = await probeModel({
+        kind,
+        baseUrl: model.baseUrl,
+        apiKey: model.apiKey,
+        modelName: model.modelName,
+      });
+      setProbe({ result });
+    } catch (error) {
+      setProbe({ result: { status: "error", message: (error as Error).message, billable: false } });
+    }
+  };
 
   return (
     <div className="image-model-card">
@@ -121,11 +139,28 @@ function ModelCard({ model, onChange, onRemove, customSizeSupported, onCustomSiz
           <span>上游支持任意图片尺寸</span>
         </label>
       )}
+      <div className="model-test-row">
+        <button className="btn" type="button" onClick={test} disabled={probe.testing}>
+          {probe.testing ? "测试中…" : "测试模型"}
+        </button>
+        {probe.result && <ProbeResultView result={probe.result} />}
+      </div>
     </div>
   );
 }
 
+function ProbeResultView({ result }: { result: ModelProbeResult }) {
+  const Icon = result.status === "success" ? CheckCircle2 : result.status === "warning" ? AlertTriangle : XCircle;
+  return (
+    <span className={`model-probe-result ${result.status}`} title={result.source || result.message}>
+      <Icon size={14} /> {result.message}
+    </span>
+  );
+}
+
 export function ModelsPanel({ draft, setDraft }: PanelProps) {
+  const [embedProbe, setEmbedProbe] = useState<{ testing?: boolean; result?: ModelProbeResult }>({});
+  const [rerankerProbe, setRerankerProbe] = useState<{ testing?: boolean; result?: ModelProbeResult }>({});
   const setEmbed = (patch: Partial<EmbedModel>) =>
     setDraft((d) => ({ ...d, embedModel: { ...d.embedModel, ...patch } }));
 
@@ -150,7 +185,30 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
   const removeVideoModel = (id: string) =>
     setDraft((d) => ({ ...d, videoModels: (d.videoModels || []).filter((m) => m.id !== id), activeVideoModelId: d.activeVideoModelId === id ? undefined : d.activeVideoModelId }));
 
+  const testEmbed = async () => {
+    setEmbedProbe({ testing: true });
+    try {
+      const result = await probeModel(draft.embedModel.mode === "local"
+        ? { kind: "embedding-local", modelDir: draft.embedModel.modelDir }
+        : { kind: "embedding", baseUrl: draft.embedModel.baseUrl, apiKey: draft.embedModel.apiKey, modelName: draft.embedModel.modelName });
+      setEmbedProbe({ result });
+    } catch (error) {
+      setEmbedProbe({ result: { status: "error", message: (error as Error).message, billable: false } });
+    }
+  };
+
+  const testReranker = async () => {
+    setRerankerProbe({ testing: true });
+    try {
+      const result = await probeModel({ kind: "reranker-local", modelDir: draft.embedModel.rerankerDir });
+      setRerankerProbe({ result });
+    } catch (error) {
+      setRerankerProbe({ result: { status: "error", message: (error as Error).message, billable: false } });
+    }
+  };
+
   const embedProvider = (() => {
+    if (draft.embedModel.mode === "local") return "本地模型文件";
     const u = (draft.embedModel.baseUrl || "").toLowerCase();
     if (u.includes("11434") || u.includes("ollama")) return "本地 Ollama";
     if (u.includes("bigmodel.cn")) return "云端智谱";
@@ -161,6 +219,9 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
 
   return (
     <>
+      <p className="field-hint model-probe-notice">
+        模型测试只做无计费连接/模型目录探测；不会调用聊天、Embedding、图片或视频生成。填写本地目录时会执行一次本地最小推理。
+      </p>
       {/* 对话模型 */}
       <div className="settings-section">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -171,7 +232,7 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
         <div style={{ marginTop: 12 }}>
           {draft.chatModels.length === 0 && <p className="field-hint">还没有对话模型，点击「添加」。</p>}
           {draft.chatModels.map((m) => (
-            <ModelCard key={m.id} model={m} onChange={(p) => updateChatModel(m.id!, p)} onRemove={() => removeChatModel(m.id!)} />
+            <ModelCard key={m.id} model={m} kind="chat" onChange={(p) => updateChatModel(m.id!, p)} onRemove={() => removeChatModel(m.id!)} />
           ))}
         </div>
       </div>
@@ -188,6 +249,7 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
             <ModelCard
               key={m.id}
               model={m}
+              kind="image"
               customSizeSupported={m.supportsCustomSize}
               onCustomSizeSupport={(enabled) => updateImageModel(m.id, { supportsCustomSize: enabled })}
               onChange={(p) => updateImageModel(m.id, p as Partial<ImageModel>)}
@@ -207,7 +269,7 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
         <div style={{ marginTop: 12 }}>
           {(draft.videoModels || []).length === 0 && <p className="field-hint">还没有视频模型，点击「添加」。</p>}
           {(draft.videoModels || []).map((m) => (
-            <ModelCard key={m.id} model={m} onChange={(p) => updateVideoModel(m.id, p as Partial<VideoModel>)} onRemove={() => removeVideoModel(m.id)} />
+            <ModelCard key={m.id} model={m} kind="video" onChange={(p) => updateVideoModel(m.id, p as Partial<VideoModel>)} onRemove={() => removeVideoModel(m.id)} />
           ))}
         </div>
       </div>
@@ -215,16 +277,64 @@ export function ModelsPanel({ draft, setDraft }: PanelProps) {
       {/* 嵌入模型 */}
       <div className="settings-section">
         <h4>嵌入模型（知识库 RAG）</h4>
-        <p className="field-hint" style={{ margin: "0 0 10px" }}>用于把仓库资料/生成历史向量化检索。需支持 embeddings 接口，如智谱 embedding-3、OpenAI text-embedding-3、Ollama 本地向量模型。</p>
+        <p className="field-hint" style={{ margin: "0 0 10px" }}>用于把仓库资料/生成历史向量化检索。需支持 embeddings 接口，如智谱 embedding-3、OpenAI text-embedding-3、Ollama 本地向量模型。模型文件不随项目发布包提供。</p>
+        <div className="embedding-mode-tabs" role="group" aria-label="嵌入模型来源">
+          <button
+            type="button"
+            className={`btn${draft.embedModel.mode === "remote" ? " primary is-selected" : ""}`}
+            aria-pressed={draft.embedModel.mode === "remote"}
+            onClick={() => setEmbed({ mode: "remote" })}
+          >API / Ollama</button>
+          <button
+            type="button"
+            className={`btn${draft.embedModel.mode === "local" ? " primary is-selected" : ""}`}
+            aria-pressed={draft.embedModel.mode === "local"}
+            onClick={() => setEmbed({ mode: "local" })}
+          >本地模型文件</button>
+        </div>
+        {draft.embedModel.mode === "remote" && <>
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {EMBED_PRESETS.map((p) => (
-            <button key={p.name} className="btn" onClick={() => setEmbed({ baseUrl: p.baseUrl, modelName: p.modelName, apiKey: p.apiKey })}>{p.name}</button>
+            <button key={p.name} className="btn" onClick={() => setEmbed({ mode: "remote", baseUrl: p.baseUrl, modelName: p.modelName, apiKey: p.apiKey })}>{p.name}</button>
           ))}
         </div>
         <p style={{ fontSize: 12, margin: "0 0 10px" }}>当前使用：<strong>{embedProvider}</strong></p>
         <div className="field"><label>API URL</label><input value={draft.embedModel.baseUrl} onChange={(e) => setEmbed({ baseUrl: e.target.value })} placeholder="http://localhost:11434/v1" /></div>
         <div className="field"><label>API Key</label><input type="password" value={draft.embedModel.apiKey} onChange={(e) => setEmbed({ apiKey: e.target.value })} /></div>
         <div className="field"><label>模型名称</label><input value={draft.embedModel.modelName} onChange={(e) => setEmbed({ modelName: e.target.value })} placeholder="qwen3-embedding:latest" /></div>
+        </>}
+        {draft.embedModel.mode === "local" &&
+        <div className="field">
+          <label>本地嵌入模型文件夹</label>
+          <input
+            value={draft.embedModel.modelDir || ""}
+            onChange={(e) => setEmbed({ modelDir: e.target.value })}
+            placeholder="项目目录\\backend\\data\\models\\embedding"
+          />
+          <p className="field-hint">选择本地模式后只使用该目录，不会调用上方 API 配置。</p>
+        </div>
+        }
+        <div className="model-test-row">
+          <button className="btn" type="button" onClick={testEmbed} disabled={embedProbe.testing}>
+            {embedProbe.testing ? "测试中…" : "测试嵌入模型"}
+          </button>
+          {embedProbe.result && <ProbeResultView result={embedProbe.result} />}
+        </div>
+        <div className="field">
+          <label>Reranker 模型文件夹（可选）</label>
+          <input
+            value={draft.embedModel.rerankerDir || ""}
+            onChange={(e) => setEmbed({ rerankerDir: e.target.value })}
+            placeholder="完整 RAG 版留空使用内置模型；源码版填写本机模型目录"
+          />
+          <p className="field-hint">填写已下载的 Cross-Encoder 模型目录，推荐 Qwen3-Reranker-0.6B；模型不随 GitHub 发布包提供，首次使用需安装本地 RAG 可选依赖。NVIDIA 显卡需安装 CUDA 版 PyTorch，否则仅验证文件并自动回退混合检索。</p>
+        </div>
+        <div className="model-test-row">
+          <button className="btn" type="button" onClick={testReranker} disabled={rerankerProbe.testing}>
+            {rerankerProbe.testing ? "测试中…" : "测试 Reranker"}
+          </button>
+          {rerankerProbe.result && <ProbeResultView result={rerankerProbe.result} />}
+        </div>
       </div>
     </>
   );

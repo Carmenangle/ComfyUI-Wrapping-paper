@@ -3,6 +3,8 @@ backend/.venv/
 frontend/node_modules/
 node_modules/
 frontend/dist/
+vendor/npm/_logs/
+vendor/npm/_update-notifier-last-checked
 *.pyc
 __pycache__/
 .env

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { recoverAgentRun } from "./agentRecovery";
+import { recoverAgentRun, shouldRecoverAgentRun } from "./agentRecovery";
 
 describe("agent background recovery", () => {
+  it("never restores the shared home thread into the temporary homepage draft", () => {
+    expect(shouldRecoverAgentRun("home")).toBe(false);
+    expect(shouldRecoverAgentRun("repo-1")).toBe(true);
+  });
+
   it("keeps polling after the stream disconnects and returns the completed snapshot", async () => {
     const snapshots = [
       { items: [{ id: "running", role: "assistant" as const, text: "生成中" }] },

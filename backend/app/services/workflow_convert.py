@@ -10,9 +10,7 @@
 """
 from __future__ import annotations
 
-import json
-from urllib.request import urlopen
-
+from app.services import comfyui_client
 from app.services.workflow_parser import PASSTHROUGH_TYPES, WIDGET_NAMES
 
 # 不进入 API 格式的隐藏/UI-only 控件名
@@ -20,11 +18,10 @@ _HIDDEN_WIDGETS = {"control_after_generate"}
 
 
 def _object_info(comfy_url: str) -> dict:
-    """拉取 /object_info，失败返回 {}。"""
+    """经统一 ComfyUI HTTP Adapter 拉取，失败时保留转换降级语义。"""
     try:
-        with urlopen(comfy_url.rstrip("/") + "/object_info", timeout=5) as r:
-            return json.loads(r.read())
-    except Exception:
+        return comfyui_client.fetch_object_info(comfy_url, timeout=5)
+    except comfyui_client.ComfyError:
         return {}
 
 

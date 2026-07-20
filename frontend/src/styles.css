@@ -24,25 +24,25 @@ html[data-theme="bright"] {
   --radius: 8px;
 }
 
-/* 夜间参考：#1A1A1A 背景，#E5E5E5 正文 */
+/* 夜间：深青黑记录室、暖黑丝面、米白正文、青绿强调与旧金细节 */
 html[data-theme="night"] {
   color-scheme: dark;
-  --bg: #1a1a1a;
-  --surface: #1a1a1a;
-  --surface-2: #292929;
-  --text: #e5e5e5;
-  --text-muted: #a2a2a2;
-  --border: #5e5e5e;
-  --accent: #e5e5e5;
-  --accent-text: #1a1a1a;
-  --cover-bg: #292929;
-  --success: #87c79f;
-  --warning: #d2b56f;
-  --danger: #df8585;
-  --grad-band: linear-gradient(180deg, #1a1a1a 0%, #292929 100%);
-  --dot: rgba(229, 229, 229, 0.10);
-  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
-  --radius: 10px;
+  --bg: #081214;
+  --surface: #111a1b;
+  --surface-2: #1c282a;
+  --text: #e8e2d6;
+  --text-muted: #9aa8a6;
+  --border: #405557;
+  --accent: #267f78;
+  --accent-text: #f5f1e8;
+  --cover-bg: #172123;
+  --success: #6fb38b;
+  --warning: #c3a35a;
+  --danger: #c46f70;
+  --grad-band: linear-gradient(180deg, #111a1b 0%, #1c282a 100%);
+  --dot: rgba(90, 151, 145, 0.12);
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.38);
+  --radius: 8px;
 }
 
 /* 护眼：文学学院的象牙纸、鼠尾草织物、深茶结构与古金细节 */
@@ -1232,6 +1232,174 @@ body {
   gap: 8px;
 }
 
+/* 生成图蒙版编辑器 */
+.mask-editor-mask {
+  z-index: 180;
+  padding: 3vh 3vw;
+}
+
+.mask-editor-modal {
+  width: min(94vw, 1500px);
+  height: min(90vh, 980px);
+  display: grid;
+  grid-template-rows: 52px minmax(0, 1fr) 58px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+
+.mask-editor-toolbar,
+.mask-editor-footer {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+}
+
+.mask-editor-toolbar { border-bottom: 1px solid var(--border); }
+.mask-editor-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.mask-editor-tools {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+}
+
+.mask-editor-tool {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mask-editor-tool:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.mask-editor-tool.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+}
+
+.mask-editor-tool:disabled { opacity: 0.35; cursor: default; }
+.mask-editor-divider { width: 1px; height: 24px; flex: 0 0 1px; margin: 0 3px; background: var(--border); }
+.mask-editor-zoom { min-width: 48px; color: var(--text-muted); font-size: 12px; text-align: right; }
+
+.mask-editor-body {
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+}
+
+.mask-editor-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background-color: #17191d;
+  background-image:
+    linear-gradient(45deg, #22252b 25%, transparent 25%),
+    linear-gradient(-45deg, #22252b 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #22252b 75%),
+    linear-gradient(-45deg, transparent 75%, #22252b 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.mask-editor-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.mask-editor-canvas:active { cursor: crosshair; }
+.mask-editor-canvas.tool-wand,
+.mask-editor-canvas.tool-bucket { cursor: cell; }
+
+.mask-editor-status {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  transform: translate(-50%, -50%);
+}
+
+.mask-editor-status.error { color: #ffb4b4; }
+
+.mask-editor-side {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.mask-editor-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.mask-editor-field > input[type="range"] {
+  width: 100%;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+}
+
+.mask-editor-color-row { display: inline-flex; align-items: center; gap: 7px; }
+.mask-editor-color-row input[type="color"] {
+  width: 32px;
+  height: 28px;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+}
+.mask-editor-color-row output,
+.mask-editor-field output,
+.mask-editor-meta { color: var(--text-muted); font-size: 12px; }
+.mask-editor-meta { margin-top: auto; }
+
 /* 模型下载页 */
 .md-row {
   display: flex;
@@ -1899,6 +2067,36 @@ body {
   margin-bottom: 8px;
 }
 
+.embedding-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.model-test-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.model-probe-result {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.model-probe-result.success { color: #238447; }
+.model-probe-result.warning { color: #a26a00; }
+.model-probe-result.error { color: #c53b3b; }
+
 .theme-options {
   display: flex;
   gap: 8px;
@@ -2000,12 +2198,14 @@ body {
 .user-message-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
   min-height: 22px;
   margin-top: 6px;
   padding-right: 34px;
 }
 
-.user-copy-btn {
+.user-copy-btn,
+.user-edit-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2019,8 +2219,14 @@ body {
   cursor: pointer;
 }
 
-.user-copy-btn:hover:not(:disabled) { opacity: 1; }
-.user-copy-btn:disabled { cursor: default; opacity: 0.38; }
+.user-edit-btn {
+  padding: 2px;
+}
+
+.user-copy-btn:hover:not(:disabled),
+.user-edit-btn:hover:not(:disabled) { opacity: 1; }
+.user-copy-btn:disabled,
+.user-edit-btn:disabled { cursor: default; opacity: 0.38; }
 
 /* AI 消息：头像 + 内容卡 */
 .msg-bot {
@@ -2340,6 +2546,7 @@ body {
   font-size: 12px;
 }
 .queue-row-btn:hover { background: var(--accent, #4a7); color: var(--accent-text); border-color: transparent; }
+.queue-row-edit,
 .queue-row-del {
   flex-shrink: 0;
   display: inline-flex;
@@ -2352,6 +2559,7 @@ body {
   cursor: pointer;
   border-radius: 6px;
 }
+.queue-row-edit:hover,
 .queue-row-del:hover { background: var(--border); color: var(--text); }
 
 .chat-input-bar textarea {
@@ -2437,6 +2645,20 @@ body {
   display: inline-block;
   cursor: grab;
 }
+
+.rich-imgbar-mask-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  pointer-events: none;
+}
+.rich-imgbar-masked { cursor: default; }
 .rich-imgbar-item.dragging { opacity: 0.4; cursor: grabbing; }
 .rich-imgbar-item img {
   height: 52px;
@@ -3064,42 +3286,147 @@ html[data-theme="eye-care"] .chat-new-message-btn {
   overflow-wrap: anywhere;
 }
 
-/* 首页空态落地（二次元网格风样板） */
-.chat-landing {
+/* 生产主题运行时 Interface：四个 Theme Asset Pack 只声明颜色与素材槽位。 */
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-input-bar {
   position: relative;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 24px;
-  overflow: hidden;
-}
-/* 超大描边标题压顶当背景装饰 */
-.chat-landing-hero {
-  position: absolute;
-  top: 12%;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: clamp(90px, 20vw, 220px);
-  z-index: 0;
-  white-space: nowrap;
-  opacity: 0.5;
-}
-.chat-landing-hint {
-  position: relative;
-  z-index: 1;
-  color: var(--text-muted);
-  text-align: center;
-}
-.chat-landing-hint code {
-  background: var(--surface-2);
-  padding: 1px 6px;
-  border-radius: 5px;
-  font-size: 0.9em;
+  border-radius: 8px;
+  padding-top: 18px;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.chat-landing-hostess {
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-input-bar::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 14px;
+  right: 14px;
+  height: 14px;
+  pointer-events: none;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .btn:not(.danger) {
+  min-height: 40px;
+  padding: 4px 6px;
+  border-style: solid;
+  border-width: 4px 16px;
+  border-image-slice: 18 40 fill;
+  border-image-width: 4px 16px;
+  border-image-repeat: stretch;
+  border-radius: 8px;
+  background-size: 512px 512px;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) :is(.btn.primary:disabled, .btn:not(.primary):not(.danger):disabled) {
+  opacity: 0.68;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .btn.primary.is-selected:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .modal {
+  position: relative;
+  isolation: isolate;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .modal > * {
+  position: relative;
+  z-index: 1;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .modal-actions {
+  min-height: 48px;
+  padding-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) :is(.modal::before, .modal::after) {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  background-position: left top;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .modal::after {
+  transform: rotate(180deg);
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-input-resize-handle {
+  width: 190px;
+  height: 18px;
+  margin: -11px auto 5px;
+  color: transparent;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-input-resize-handle > svg {
+  display: none;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-actions {
+  position: relative;
+  padding-top: 10px;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .chat-actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  pointer-events: none;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .wf-progress-bar::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -7px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .settings-saved::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-avatar {
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  background-position: center;
+  background-size: cover;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-avatar > svg {
   display: none;
 }
 
@@ -3137,38 +3464,14 @@ html[data-theme="bright"] .chat-input-bar {
   background-size: auto, 512px 512px;
 }
 
-html[data-theme="bright"] .chat-input-bar {
-  position: relative;
-  border-radius: 8px;
-  padding-top: 18px;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
 html[data-theme="bright"] .chat-input-bar::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 14px;
-  right: 14px;
-  height: 14px;
-  pointer-events: none;
-  background: url("/controls/bright/composer-top.png") center / 100% 100% no-repeat;
+  background-image: url("/controls/bright/composer-top.png");
   opacity: 0.82;
 }
 
 html[data-theme="bright"] .btn:not(.danger) {
-  min-height: 40px;
-  padding: 4px 6px;
-  border-style: solid;
-  border-width: 4px 16px;
-  border-image-slice: 18 40 fill;
-  border-image-width: 4px 16px;
-  border-image-repeat: stretch;
-  border-radius: 8px;
   background-color: var(--surface);
   background-image: url("/textures/bright/porcelain-twill-tile.webp");
-  background-size: 512px 512px;
   background-blend-mode: multiply;
   color: var(--text);
 }
@@ -3193,15 +3496,12 @@ html[data-theme="bright"] .btn.primary.is-selected {
 html[data-theme="bright"] .btn.primary:disabled {
   background-color: #cac5ce;
   border-image-source: url("/controls/bright/button-main-disabled.png");
-  opacity: 0.68;
 }
 
 html[data-theme="bright"] .btn.primary.is-selected:disabled {
   color: #ffffff;
   background-color: #5068b0;
   border-image-source: url("/controls/bright/button-main-pressed.png");
-  opacity: 1;
-  cursor: default;
 }
 
 html[data-theme="bright"] .btn:not(.primary):not(.danger) {
@@ -3222,7 +3522,6 @@ html[data-theme="bright"] .btn:not(.primary):not(.danger):active:not(:disabled) 
 html[data-theme="bright"] .btn:not(.primary):not(.danger):disabled {
   background-color: #f2f2f2;
   border-image-source: url("/controls/bright/button-secondary-disabled.png");
-  opacity: 0.68;
 }
 
 html[data-theme="bright"] .nav-item.active {
@@ -3236,22 +3535,21 @@ html[data-theme="bright"] .nav-item.active {
 }
 
 html[data-theme="bright"] .bubble-user {
+  --message-user-art: url("/controls/bright/message-user.png");
   position: relative;
   color: var(--text);
   background-color: #eef1fb;
-  background-image: url("/controls/bright/message-user.png");
-  background-size: 100% 100%;
+  background-image: none;
   border: 0;
   border-radius: 8px 8px 2px 8px;
 }
 
 html[data-theme="bright"] .bot-content {
+  --message-assistant-art: url("/controls/bright/message-assistant.png");
   background-color: #ffffff;
-  background-image:
-    url("/controls/bright/message-assistant.png"),
-    url("/textures/bright/porcelain-twill-tile.webp");
-  background-size: 100% 100%, 512px 512px;
-  background-blend-mode: normal, multiply;
+  background-image: url("/textures/bright/porcelain-twill-tile.webp");
+  background-size: 512px 512px;
+  background-blend-mode: multiply;
   border-color: color-mix(in srgb, #647dcb 24%, var(--border));
   border-radius: 8px;
 }
@@ -3300,35 +3598,15 @@ html[data-theme="bright"] .tpl-picker-head {
   background-repeat: repeat, no-repeat, repeat;
 }
 
-html[data-theme="bright"] .modal {
-  position: relative;
-  isolation: isolate;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-html[data-theme="bright"] .modal > * {
-  position: relative;
-  z-index: 1;
-}
-
 html[data-theme="bright"] .modal-actions {
-  min-height: 48px;
   padding-right: 68px;
-  padding-bottom: 8px;
-  flex-wrap: wrap;
-  align-items: center;
 }
 
 html[data-theme="bright"] .modal::before,
 html[data-theme="bright"] .modal::after {
-  content: "";
-  position: absolute;
   width: 62px;
   height: 62px;
-  z-index: 0;
-  pointer-events: none;
-  background: url("/ornaments/bright/cut-corner-porcelain.png") left top / contain no-repeat;
+  background-image: url("/ornaments/bright/cut-corner-porcelain.png");
   opacity: 0.46;
 }
 
@@ -3340,67 +3618,29 @@ html[data-theme="bright"] .modal::before {
 html[data-theme="bright"] .modal::after {
   right: 4px;
   bottom: 4px;
-  transform: rotate(180deg);
 }
 
 html[data-theme="bright"] .chat-input-resize-handle {
-  width: 190px;
-  height: 18px;
-  margin: -11px auto 5px;
-  color: transparent;
-  background: url("/controls/bright/composer-handle.png") center / contain no-repeat;
-}
-
-html[data-theme="bright"] .chat-input-resize-handle > svg {
-  display: none;
-}
-
-html[data-theme="bright"] .chat-actions {
-  position: relative;
-  padding-top: 10px;
+  background-image: url("/controls/bright/composer-handle.png");
 }
 
 html[data-theme="bright"] .chat-actions::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 5px;
-  pointer-events: none;
-  background: url("/controls/bright/composer-divider.png") center / 100% 100% no-repeat;
+  background-image: url("/controls/bright/composer-divider.png");
   opacity: 0.76;
 }
 
 html[data-theme="bright"] .wf-progress-bar::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: -7px;
-  width: 14px;
-  height: 14px;
-  transform: translateY(-50%);
-  background: url("/ornaments/bright/node-active.png") center / contain no-repeat;
+  background-image: url("/ornaments/bright/node-active.png");
 }
 
 html[data-theme="bright"] .settings-saved::before {
-  content: "";
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  margin-right: 5px;
-  background: url("/ornaments/bright/node-success.png") center / contain no-repeat;
+  background-image: url("/ornaments/bright/node-success.png");
 }
 
 html[data-theme="bright"] .bot-avatar {
-  width: 56px;
-  height: 56px;
-  overflow: hidden;
   border: 1px solid color-mix(in srgb, #647dcb 54%, transparent);
   background-color: #ffffff;
   background-image: url("/support/bright/112/hostess-main.png");
-  background-position: center;
-  background-size: cover;
 }
 
 html[data-theme="bright"] .bot-avatar-listening {
@@ -3415,10 +3655,6 @@ html[data-theme="bright"] .bot-avatar-complete {
   background-image: url("/support/bright/112/hostess-success.png");
 }
 
-html[data-theme="bright"] .bot-avatar > svg {
-  display: none;
-}
-
 html[data-theme="bright"] .empty-state {
   min-height: 190px;
   padding-top: 126px;
@@ -3429,31 +3665,466 @@ html[data-theme="bright"] .empty-state > svg {
   display: none;
 }
 
-html[data-theme="bright"] .chat-landing {
-  background: transparent;
+/* 夜间主题生产资产：深青黑观测记录室、暖黑丝面与旧金天球细节。 */
+html[data-theme="night"] .main {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(8, 18, 20, 0.48), rgba(8, 18, 20, 0.48)),
+    url("/backgrounds/night/chat-celestial-record.webp"),
+    url("/textures/night/deep-teal-worsted-tile.webp");
+  background-position: center, center, top left;
+  background-size: auto, cover, 512px 512px;
 }
 
-html[data-theme="bright"] .chat-landing-hint {
-  width: min(680px, 100%);
-  overflow-wrap: anywhere;
-  line-height: 1.65;
+html[data-theme="night"] .support-fab {
+  border: 1px solid color-mix(in srgb, #b99a52 66%, transparent);
+  background: #111a1b;
+  overflow: hidden;
 }
 
-html[data-theme="bright"] .chat-landing-hero {
+html[data-theme="night"] .support-fab-headset {
   display: none;
 }
 
-html[data-theme="bright"] .chat-landing-hostess {
+html[data-theme="night"] .support-fab-emblem {
   display: block;
-  width: 168px;
-  height: 168px;
-  object-fit: cover;
-  content: url("/support/bright/168/hostess-main.png");
-  border: 1px solid color-mix(in srgb, #647dcb 54%, transparent);
-  border-radius: 50%;
-  background: #ffffff;
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  background-image: url("/ornaments/night/empty-state-journal.png");
 }
 
+html[data-theme="night"] .sidebar,
+html[data-theme="night"] .chat-input-bar {
+  background-color: #111a1b;
+  background-image:
+    linear-gradient(rgba(12, 24, 26, 0.78), rgba(12, 24, 26, 0.78)),
+    url("/textures/night/deep-teal-worsted-tile.webp");
+  background-size: auto, 512px 512px;
+}
+
+html[data-theme="night"] .chat-input-bar::before {
+  background-image: url("/controls/night/composer-top.png");
+  opacity: 0.84;
+}
+
+html[data-theme="night"] .btn:not(.danger) {
+  background-color: #162224;
+  background-image: url("/textures/night/warm-black-silk-tile.webp");
+  background-blend-mode: soft-light;
+  color: var(--text);
+}
+
+html[data-theme="night"] .btn.primary {
+  color: #f3eee2;
+  background-color: #176f6b;
+  border-image-source: url("/controls/night/button-main-default.png");
+}
+
+html[data-theme="night"] .btn.primary:hover:not(:disabled):not(.is-selected) {
+  background-color: #20847e;
+  border-image-source: url("/controls/night/button-main-hover.png");
+}
+
+html[data-theme="night"] .btn.primary:active:not(:disabled),
+html[data-theme="night"] .btn.primary.is-selected {
+  background-color: #115854;
+  border-image-source: url("/controls/night/button-main-pressed.png");
+}
+
+html[data-theme="night"] .btn.primary:disabled {
+  background-color: #343b3c;
+  border-image-source: url("/controls/night/button-main-disabled.png");
+}
+
+html[data-theme="night"] .btn.primary.is-selected:disabled {
+  color: #f3eee2;
+  background-color: #115854;
+  border-image-source: url("/controls/night/button-main-pressed.png");
+}
+
+html[data-theme="night"] .btn:not(.primary):not(.danger) {
+  background-color: #172123;
+  border-image-source: url("/controls/night/button-secondary-default.png");
+}
+
+html[data-theme="night"] .btn:not(.primary):not(.danger):hover:not(:disabled) {
+  background-color: #233133;
+  border-image-source: url("/controls/night/button-secondary-hover.png");
+}
+
+html[data-theme="night"] .btn:not(.primary):not(.danger):active:not(:disabled) {
+  background-color: #0e1718;
+  border-image-source: url("/controls/night/button-secondary-pressed.png");
+}
+
+html[data-theme="night"] .btn:not(.primary):not(.danger):disabled {
+  background-color: #222829;
+  border-image-source: url("/controls/night/button-secondary-disabled.png");
+}
+
+html[data-theme="night"] .nav-item.active {
+  color: #f3eee2;
+  background-color: #176f6b;
+  background-image:
+    linear-gradient(rgba(23, 111, 107, 0.72), rgba(23, 111, 107, 0.72)),
+    url("/textures/night/deep-teal-worsted-tile.webp");
+  background-size: auto, 384px 384px;
+  box-shadow: inset 3px 0 0 #b99a52;
+}
+
+html[data-theme="night"] .bubble-user {
+  --message-user-art: url("/controls/night/message-user.png");
+  position: relative;
+  color: #f3eee2;
+  background-color: #123c3b;
+  background-image: none;
+  border: 0;
+  border-radius: 8px 8px 2px 8px;
+}
+
+html[data-theme="night"] .bot-content {
+  --message-assistant-art: url("/controls/night/message-assistant.png");
+  color: var(--text);
+  background-color: #151d1f;
+  background-image: url("/textures/night/warm-black-silk-tile.webp");
+  background-size: 512px 512px;
+  background-blend-mode: soft-light;
+  border-color: color-mix(in srgb, #5a9791 38%, var(--border));
+  border-radius: 8px;
+}
+
+html[data-theme="night"] .context-reminder {
+  color: var(--text);
+  background-color: #20201e;
+  background-image: url("/controls/night/message-system.png");
+  background-size: 100% 100%;
+  border: 0;
+  border-radius: 8px;
+}
+
+html[data-theme="night"] .chat-stream {
+  background-color: #0c1214;
+  background-image:
+    linear-gradient(rgba(6, 13, 15, 0.30), rgba(6, 13, 15, 0.30)),
+    url("/backgrounds/night/chat-moonless-observatory.webp");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+html[data-theme="night"] .page-head,
+html[data-theme="night"] .chat-view-head {
+  border-bottom: 0;
+  padding-bottom: 18px;
+  background: url("/ornaments/night/divider-node.png") center bottom / min(100%, 1120px) 10px no-repeat;
+}
+
+html[data-theme="night"] .settings-section h4 {
+  padding-bottom: 10px;
+  background: url("/ornaments/night/divider-double.png") left bottom / min(100%, 620px) 6px no-repeat;
+}
+
+html[data-theme="night"] .comfy-panel-head,
+html[data-theme="night"] .dl-panel-head,
+html[data-theme="night"] .tpl-picker-head {
+  color: #f3eee2;
+  background-color: #10191a;
+  background-image:
+    linear-gradient(rgba(9, 22, 24, 0.34), rgba(9, 22, 24, 0.34)),
+    url("/textures/night/celestial-coordinate-strip.webp"),
+    url("/textures/night/deep-teal-worsted-tile.webp");
+  background-size: auto, cover, 512px 512px;
+  background-position: center;
+}
+
+html[data-theme="night"] .modal-actions {
+  padding-right: 64px;
+}
+
+html[data-theme="night"] .modal::before,
+html[data-theme="night"] .modal::after {
+  width: 58px;
+  height: 58px;
+  background-image: url("/ornaments/night/corner-flow.png");
+  opacity: 0.68;
+}
+
+html[data-theme="night"] .modal::before {
+  top: 5px;
+  left: 5px;
+}
+
+html[data-theme="night"] .modal::after {
+  right: 5px;
+  bottom: 5px;
+}
+
+html[data-theme="night"] .chat-input-resize-handle {
+  background-image: url("/controls/night/composer-handle.png");
+}
+
+html[data-theme="night"] .chat-actions::before {
+  background-image: url("/controls/night/composer-divider.png");
+  opacity: 0.76;
+}
+
+html[data-theme="night"] .wf-progress-bar::after {
+  background-image: url("/ornaments/night/node-active.png");
+}
+
+html[data-theme="night"] .settings-saved::before {
+  background-image: url("/ornaments/night/node-success.png");
+}
+
+html[data-theme="night"] .bot-avatar {
+  border: 1px solid color-mix(in srgb, #b99a52 66%, transparent);
+  background-color: #111a1b;
+  background-image: url("/support/night/112/hostess-main.png");
+}
+
+html[data-theme="night"] .bot-avatar-listening {
+  background-image: url("/support/night/112/hostess-listening.png");
+}
+
+html[data-theme="night"] .bot-avatar-thinking {
+  background-image: url("/support/night/112/hostess-thinking.png");
+}
+
+html[data-theme="night"] .bot-avatar-complete {
+  background-image: url("/support/night/112/hostess-success.png");
+}
+
+html[data-theme="night"] .empty-state {
+  min-height: 190px;
+  padding-top: 126px;
+  background: url("/ornaments/night/empty-state-journal.png") center 18px / 54px 96px no-repeat;
+}
+
+html[data-theme="night"] .empty-state > svg {
+  display: none;
+}
+
+/* 绿色主题生产资产：潮汐叶脉、群青丝绡与翡翠丝毛绉。 */
+html[data-theme="green"] .main {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgba(233, 245, 233, 0.50), rgba(233, 245, 233, 0.50)),
+    url("/backgrounds/green/chat-tide-vein.webp"),
+    url("/textures/green/jade-crepe-tile.webp");
+  background-position: center, center, top left;
+  background-size: auto, cover, 512px 512px;
+}
+
+html[data-theme="green"] .support-fab {
+  border: 1px solid color-mix(in srgb, #277f73 68%, transparent);
+  background: #e9f5e9;
+  overflow: hidden;
+}
+
+html[data-theme="green"] .support-fab-headset { display: none; }
+
+html[data-theme="green"] .support-fab-emblem {
+  display: block;
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  background-image: url("/ornaments/green/empty-state-symbiosis.png");
+}
+
+html[data-theme="green"] .sidebar,
+html[data-theme="green"] .chat-input-bar {
+  background-color: #e9f5e9;
+  background-image:
+    linear-gradient(rgba(233, 245, 233, 0.82), rgba(233, 245, 233, 0.82)),
+    url("/textures/green/jade-crepe-tile.webp");
+  background-size: auto, 512px 512px;
+}
+
+html[data-theme="green"] .chat-input-bar::before {
+  background-image: url("/controls/green/composer-top.png");
+  opacity: 0.84;
+}
+
+html[data-theme="green"] .btn:not(.danger) {
+  background-color: #e9f5e9;
+  background-image: url("/textures/green/cobalt-silk-tile.webp");
+  background-blend-mode: soft-light;
+  color: var(--text);
+}
+
+html[data-theme="green"] .btn.primary {
+  color: #f4fbf4;
+  background-color: #2f8a7c;
+  border-image-source: url("/controls/green/button-main-default.png");
+}
+
+html[data-theme="green"] .btn.primary:hover:not(:disabled):not(.is-selected) {
+  background-color: #3c9b8b;
+  border-image-source: url("/controls/green/button-main-hover.png");
+}
+
+html[data-theme="green"] .btn.primary:active:not(:disabled),
+html[data-theme="green"] .btn.primary.is-selected {
+  background-color: #276c72;
+  border-image-source: url("/controls/green/button-main-pressed.png");
+}
+
+html[data-theme="green"] .btn.primary:disabled {
+  background-color: #94a9b0;
+  border-image-source: url("/controls/green/button-main-disabled.png");
+}
+
+html[data-theme="green"] .btn.primary.is-selected:disabled {
+  color: #f4fbf4;
+  background-color: #276c72;
+  border-image-source: url("/controls/green/button-main-pressed.png");
+}
+
+html[data-theme="green"] .btn:not(.primary):not(.danger) {
+  background-color: #e9f5e9;
+  border-image-source: url("/controls/green/button-secondary-default.png");
+}
+
+html[data-theme="green"] .btn:not(.primary):not(.danger):hover:not(:disabled) {
+  background-color: #f2faf2;
+  border-image-source: url("/controls/green/button-secondary-hover.png");
+}
+
+html[data-theme="green"] .btn:not(.primary):not(.danger):active:not(:disabled) {
+  background-color: #d2e9e2;
+  border-image-source: url("/controls/green/button-secondary-pressed.png");
+}
+
+html[data-theme="green"] .btn:not(.primary):not(.danger):disabled {
+  background-color: #d6e0e1;
+  border-image-source: url("/controls/green/button-secondary-disabled.png");
+}
+
+html[data-theme="green"] .nav-item.active {
+  color: #f4fbf4;
+  background-color: #2f8a7c;
+  background-image:
+    linear-gradient(rgba(47, 138, 124, 0.72), rgba(47, 138, 124, 0.72)),
+    url("/textures/green/jade-crepe-tile.webp");
+  background-size: auto, 384px 384px;
+  box-shadow: inset 3px 0 0 #e28a58;
+}
+
+html[data-theme="green"] .bubble-user {
+  --message-user-art: url("/controls/green/message-user.png");
+  position: relative;
+  color: #244d49;
+  background-color: #d8eee8;
+  background-image: none;
+  border: 0;
+  border-radius: 8px 8px 2px 8px;
+}
+
+html[data-theme="green"] .bot-content {
+  --message-assistant-art: url("/controls/green/message-assistant.png");
+  color: var(--text);
+  background-color: #e9f5f5;
+  background-image: url("/textures/green/jade-crepe-tile.webp");
+  background-size: 512px 512px;
+  background-blend-mode: soft-light;
+  border-color: color-mix(in srgb, #277f73 38%, var(--border));
+  border-radius: 8px;
+}
+
+html[data-theme="green"] .context-reminder {
+  color: var(--text);
+  background-color: #edf8f5;
+  background-image: url("/controls/green/message-system.png");
+  background-size: 100% 100%;
+  border: 0;
+  border-radius: 8px;
+}
+
+html[data-theme="green"] .chat-stream {
+  background-color: #e9f5e9;
+  background-image:
+    linear-gradient(rgba(233, 245, 233, 0.70), rgba(233, 245, 233, 0.70)),
+    url("/backgrounds/green/chat-institute-atrium.webp");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+html[data-theme="green"] .page-head,
+html[data-theme="green"] .chat-view-head {
+  border-bottom: 0;
+  padding-bottom: 18px;
+  background: url("/ornaments/green/divider-node.png") center bottom / min(100%, 1120px) 10px no-repeat;
+}
+
+html[data-theme="green"] .settings-section h4 {
+  padding-bottom: 10px;
+  background: url("/ornaments/green/divider-double.png") left bottom / min(100%, 620px) 6px no-repeat;
+}
+
+html[data-theme="green"] .comfy-panel-head,
+html[data-theme="green"] .dl-panel-head,
+html[data-theme="green"] .tpl-picker-head {
+  color: #f4fbf4;
+  background-color: #24656a;
+  background-image:
+    linear-gradient(rgba(36, 101, 106, 0.34), rgba(36, 101, 106, 0.34)),
+    url("/textures/green/tide-vein-strip.webp"),
+    url("/textures/green/jade-crepe-tile.webp");
+  background-size: auto, cover, 512px 512px;
+  background-position: center;
+}
+
+html[data-theme="green"] .modal-actions {
+  padding-right: 64px;
+}
+
+html[data-theme="green"] .modal::before,
+html[data-theme="green"] .modal::after {
+  width: 58px;
+  height: 58px;
+  background-image: url("/ornaments/green/calyx-corner-cut.png");
+  opacity: 0.68;
+}
+
+html[data-theme="green"] .modal::before { top: 5px; left: 5px; }
+html[data-theme="green"] .modal::after { right: 5px; bottom: 5px; }
+
+html[data-theme="green"] .chat-input-resize-handle {
+  background-image: url("/controls/green/composer-handle.png");
+}
+
+html[data-theme="green"] .chat-actions::before {
+  background-image: url("/controls/green/composer-divider.png");
+  opacity: 0.76;
+}
+
+html[data-theme="green"] .wf-progress-bar::after {
+  background-image: url("/ornaments/green/node-active.png");
+}
+
+html[data-theme="green"] .settings-saved::before {
+  background-image: url("/ornaments/green/node-success.png");
+}
+
+html[data-theme="green"] .bot-avatar {
+  border: 1px solid color-mix(in srgb, #277f73 68%, transparent);
+  background-color: #e9f5e9;
+  background-image: url("/support/green/112/hostess-main.png");
+}
+
+html[data-theme="green"] .bot-avatar-listening { background-image: url("/support/green/112/hostess-listening.png"); }
+html[data-theme="green"] .bot-avatar-thinking { background-image: url("/support/green/112/hostess-thinking.png"); }
+html[data-theme="green"] .bot-avatar-complete { background-image: url("/support/green/112/hostess-success.png"); }
+
+html[data-theme="green"] .empty-state {
+  min-height: 190px;
+  padding-top: 126px;
+  background: url("/ornaments/green/empty-state-symbiosis.png") center 18px / 96px 96px no-repeat;
+}
+
+html[data-theme="green"] .empty-state > svg { display: none; }
 /* 护眼主题生产资产：纹理保持低对比，装饰不进入正文中心。 */
 html[data-theme="eye-care"] .main {
   background-color: var(--bg);
@@ -3488,39 +4159,15 @@ html[data-theme="eye-care"] .chat-input-bar {
   background-size: auto, 512px 512px;
 }
 
-html[data-theme="eye-care"] .chat-input-bar {
-  position: relative;
-  border-radius: 8px;
-  padding-top: 18px;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
 html[data-theme="eye-care"] .chat-input-bar::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 14px;
-  right: 14px;
-  height: 14px;
-  pointer-events: none;
-  background: url("/controls/eye-care/composer-top.png") center / 100% 100% no-repeat;
+  background-image: url("/controls/eye-care/composer-top.png");
   opacity: 0.84;
 }
 
 /* 按钮框采用九宫格切片：四角和侧饰固定，只有中心与边线伸缩。 */
 html[data-theme="eye-care"] .btn:not(.danger) {
-  min-height: 40px;
-  padding: 4px 6px;
-  border-style: solid;
-  border-width: 4px 16px;
-  border-image-slice: 18 40 fill;
-  border-image-width: 4px 16px;
-  border-image-repeat: stretch;
-  border-radius: 8px;
   background-color: var(--surface);
   background-image: url("/textures/eye-care/ivory-paper-tile.webp");
-  background-size: 512px 512px;
   color: var(--text);
 }
 
@@ -3543,14 +4190,11 @@ html[data-theme="eye-care"] .btn.primary.is-selected {
 
 html[data-theme="eye-care"] .btn.primary:disabled {
   border-image-source: url("/controls/eye-care/button-main-disabled.png");
-  opacity: 0.68;
 }
 
 html[data-theme="eye-care"] .btn.primary.is-selected:disabled {
   color: var(--text);
   border-image-source: url("/controls/eye-care/button-main-pressed.png");
-  opacity: 1;
-  cursor: default;
 }
 
 /* 紧凑发送按钮也使用切片框，侧饰由真实边框宽度隔离，不再压住图标。 */
@@ -3573,7 +4217,6 @@ html[data-theme="eye-care"] .btn:not(.primary):not(.danger):active:not(:disabled
 
 html[data-theme="eye-care"] .btn:not(.primary):not(.danger):disabled {
   border-image-source: url("/controls/eye-care/button-secondary-disabled.png");
-  opacity: 0.68;
 }
 
 html[data-theme="eye-care"] .nav-item.active {
@@ -3623,12 +4266,11 @@ html[data-theme="eye-care"] .bubble-user::after {
 }
 
 html[data-theme="eye-care"] .bot-content {
+  --message-assistant-art: url("/controls/eye-care/message-assistant.png");
   background-color: var(--surface);
-  background-image:
-    url("/controls/eye-care/message-assistant.png"),
-    url("/textures/eye-care/ivory-paper-tile.webp");
-  background-size: 100% 100%, 512px 512px;
-  background-blend-mode: multiply, normal;
+  background-image: url("/textures/eye-care/ivory-paper-tile.webp");
+  background-size: 512px 512px;
+  background-blend-mode: normal;
   border-color: color-mix(in srgb, #c3a35a 38%, var(--border));
   border-radius: 8px;
 }
@@ -3675,35 +4317,15 @@ html[data-theme="eye-care"] .tpl-picker-head {
   background-position: center;
 }
 
-html[data-theme="eye-care"] .modal {
-  position: relative;
-  isolation: isolate;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-html[data-theme="eye-care"] .modal > * {
-  position: relative;
-  z-index: 1;
-}
-
 html[data-theme="eye-care"] .modal-actions {
-  min-height: 48px;
   padding-right: 64px;
-  padding-bottom: 8px;
-  flex-wrap: wrap;
-  align-items: center;
 }
 
 html[data-theme="eye-care"] .modal::before,
 html[data-theme="eye-care"] .modal::after {
-  content: "";
-  position: absolute;
   width: 58px;
   height: 58px;
-  z-index: 0;
-  pointer-events: none;
-  background: url("/ornaments/eye-care/gold-corner-vine.png") left top / contain no-repeat;
+  background-image: url("/ornaments/eye-care/gold-corner-vine.png");
   opacity: 0.62;
 }
 
@@ -3715,67 +4337,29 @@ html[data-theme="eye-care"] .modal::before {
 html[data-theme="eye-care"] .modal::after {
   right: 5px;
   bottom: 5px;
-  transform: rotate(180deg);
 }
 
 html[data-theme="eye-care"] .chat-input-resize-handle {
-  width: 190px;
-  height: 18px;
-  margin: -11px auto 5px;
-  color: transparent;
-  background: url("/controls/eye-care/composer-handle.png") center / contain no-repeat;
-}
-
-html[data-theme="eye-care"] .chat-input-resize-handle > svg {
-  display: none;
-}
-
-html[data-theme="eye-care"] .chat-actions {
-  position: relative;
-  padding-top: 10px;
+  background-image: url("/controls/eye-care/composer-handle.png");
 }
 
 html[data-theme="eye-care"] .chat-actions::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 5px;
-  pointer-events: none;
-  background: url("/controls/eye-care/composer-divider.png") center / 100% 100% no-repeat;
+  background-image: url("/controls/eye-care/composer-divider.png");
   opacity: 0.72;
 }
 
 html[data-theme="eye-care"] .wf-progress-bar::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: -7px;
-  width: 14px;
-  height: 14px;
-  transform: translateY(-50%);
-  background: url("/ornaments/eye-care/node-active.png") center / contain no-repeat;
+  background-image: url("/ornaments/eye-care/node-active.png");
 }
 
 html[data-theme="eye-care"] .settings-saved::before {
-  content: "";
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  margin-right: 5px;
-  background: url("/ornaments/eye-care/node-success.png") center / contain no-repeat;
+  background-image: url("/ornaments/eye-care/node-success.png");
 }
 
 html[data-theme="eye-care"] .bot-avatar {
-  width: 56px;
-  height: 56px;
-  overflow: hidden;
   border: 1px solid color-mix(in srgb, #c3a35a 64%, transparent);
   background-color: #faf7ea;
   background-image: url("/support/eye-care/112/hostess-main.png");
-  background-position: center;
-  background-size: cover;
 }
 
 html[data-theme="eye-care"] .bot-avatar-listening {
@@ -3788,28 +4372,6 @@ html[data-theme="eye-care"] .bot-avatar-thinking {
 
 html[data-theme="eye-care"] .bot-avatar-complete {
   background-image: url("/support/eye-care/112/hostess-success.png");
-}
-
-html[data-theme="eye-care"] .bot-avatar > svg {
-  display: none;
-}
-
-html[data-theme="eye-care"] .chat-landing {
-  background: transparent;
-}
-
-html[data-theme="eye-care"] .chat-landing-hero {
-  display: none;
-}
-
-html[data-theme="eye-care"] .chat-landing-hostess {
-  display: block;
-  width: 168px;
-  height: 168px;
-  object-fit: cover;
-  border: 1px solid color-mix(in srgb, #c3a35a 64%, transparent);
-  border-radius: 50%;
-  background: #faf7ea;
 }
 
 /* ===== Smithery 市场浏览弹窗（左筛选 + 右卡片列表，对标官网） ===== */
@@ -3943,6 +4505,73 @@ html[data-theme="high-contrast"] .support-panel {
   -webkit-box-orient: vertical;
 }
 
+/* 消息素材中的角饰分层固定，正文增高时只延伸底色与无缝纹理。 */
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user,
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user > *,
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content > * {
+  position: relative;
+  z-index: 1;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user::before,
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user::after,
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content::before,
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-repeat: no-repeat;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user::before {
+  top: 0;
+  height: 18px;
+  background-image: var(--message-user-art);
+  background-position: center top;
+  background-size: 100% auto;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .bubble-user::after {
+  bottom: 0;
+  height: 104px;
+  background-image: var(--message-user-art);
+  background-position: center bottom;
+  background-size: 100% auto;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"]) .user-message-actions {
+  padding-right: 96px;
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content::before {
+  top: 0;
+  height: 240px;
+  background-image: var(--message-assistant-art);
+  background-position: center top;
+  background-size: 100% auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
+}
+
+html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"]) .bot-content::after {
+  bottom: 0;
+  height: 18px;
+  background-image: var(--message-assistant-art);
+  background-position: center bottom;
+  background-size: 100% auto;
+}
+
 /* ===== Responsive application shell ===== */
 @media (max-width: 1200px) {
   .repo-grid {
@@ -3963,6 +4592,36 @@ html[data-theme="high-contrast"] .support-panel {
 }
 
 @media (max-width: 720px) {
+  .mask-editor-mask { padding: 2vh 2vw; }
+
+  .mask-editor-modal {
+    width: 96vw;
+    height: 96vh;
+    grid-template-rows: 52px minmax(0, 1fr) 58px;
+  }
+
+  .mask-editor-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .mask-editor-side {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    min-height: 104px;
+    flex-direction: row;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .mask-editor-field { min-width: 170px; }
+  .mask-editor-meta { margin: 0 0 0 auto; white-space: nowrap; }
+
   html[data-theme="bright"] body {
     overflow: hidden;
   }
@@ -4044,21 +4703,173 @@ html[data-theme="high-contrast"] .support-panel {
     flex: 0 0 min(220px, 28vh);
   }
 
-  html[data-theme="bright"] .chat-landing {
-    padding: 20px 12px;
-  }
-
-  html[data-theme="bright"] .chat-landing-hostess {
-    width: 112px;
-    height: 112px;
-    content: url("/support/bright/112/hostess-main.png");
-  }
-
   html[data-theme="bright"] .chat-input-bar {
     padding-inline: 10px;
   }
 
   html[data-theme="bright"] .support-fab {
+    top: auto !important;
+    right: 12px;
+    bottom: 10px !important;
+  }
+
+  html[data-theme="night"] body {
+    overflow: hidden;
+  }
+
+  html[data-theme="night"] .layout {
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  html[data-theme="night"] .sidebar {
+    width: 100%;
+    height: 68px;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: thin;
+  }
+
+  html[data-theme="night"] .sidebar .brand {
+    flex: 0 0 146px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  html[data-theme="night"] .sidebar .spacer,
+  html[data-theme="night"] .nav-group-title {
+    display: none;
+  }
+
+  html[data-theme="night"] .nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  html[data-theme="night"] .nav-group .nav-item,
+  html[data-theme="night"] .sidebar > .nav-item {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+
+  html[data-theme="night"] .main {
+    min-width: 0;
+    margin-right: 0;
+    padding-bottom: 72px;
+  }
+
+  html[data-theme="night"] .chat-view {
+    padding: 12px;
+  }
+
+  html[data-theme="night"] .chat-view-head {
+    gap: 8px;
+  }
+
+  html[data-theme="night"] .chat-view-head h1 {
+    width: 100%;
+  }
+
+  html[data-theme="night"] .chat-layout {
+    flex-direction: column;
+  }
+
+  html[data-theme="night"] .chat-col {
+    min-height: 0;
+  }
+
+  html[data-theme="night"] .comfy-panel {
+    width: 100%;
+    min-width: 0;
+    min-height: 160px;
+    flex: 0 0 min(220px, 28vh);
+  }
+
+  html[data-theme="night"] .chat-input-bar {
+    padding-inline: 10px;
+  }
+
+  html[data-theme="night"] .support-fab {
+    top: auto !important;
+    right: 12px;
+    bottom: 10px !important;
+  }
+
+  html[data-theme="green"] body { overflow: hidden; }
+
+  html[data-theme="green"] .layout {
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  html[data-theme="green"] .sidebar {
+    width: 100%;
+    height: 68px;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: thin;
+  }
+
+  html[data-theme="green"] .sidebar .brand {
+    flex: 0 0 146px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  html[data-theme="green"] .sidebar .spacer,
+  html[data-theme="green"] .nav-group-title { display: none; }
+
+  html[data-theme="green"] .nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  html[data-theme="green"] .nav-group .nav-item,
+  html[data-theme="green"] .sidebar > .nav-item {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+
+  html[data-theme="green"] .main {
+    min-width: 0;
+    margin-right: 0;
+    padding-bottom: 72px;
+  }
+
+  html[data-theme="green"] .chat-view { padding: 12px; }
+  html[data-theme="green"] .chat-view-head { gap: 8px; }
+  html[data-theme="green"] .chat-view-head h1 { width: 100%; }
+  html[data-theme="green"] .chat-layout { flex-direction: column; }
+  html[data-theme="green"] .chat-col { min-height: 0; }
+
+  html[data-theme="green"] .comfy-panel {
+    width: 100%;
+    min-width: 0;
+    min-height: 160px;
+    flex: 0 0 min(220px, 28vh);
+  }
+
+  html[data-theme="green"] .chat-input-bar { padding-inline: 10px; }
+
+  html[data-theme="green"] .support-fab {
     top: auto !important;
     right: 12px;
     bottom: 10px !important;

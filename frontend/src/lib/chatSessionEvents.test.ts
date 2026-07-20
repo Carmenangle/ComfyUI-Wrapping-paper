@@ -1,57 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { agentImageMessage, applyPromptApproval, applyRouteChoice, inspirationMessage, upsertMessages, workflowMessages } from "./chatSessionEvents";
 
-describe("chat session event projections", () => {
-  it("keeps backend image ids and replaces duplicates", () => {
-    const image = agentImageMessage("local://image", "image-1");
-    expect(image.id).toBe("image-1");
-    expect(upsertMessages([{ ...image, image: "old" }], [image])).toEqual([image]);
+import type { ChatMessage } from "../types/chat";
+import { reduceChatStreamEvent } from "./chatSessionEvents";
+
+const base = (): ChatMessage[] => [
+  { id: "bot", role: "assistant", text: "" },
+  { id: "user", role: "user", text: "需求" },
+];
+
+describe("reduceChatStreamEvent", () => {
+  it("merges trace and delta into the active assistant message", () => {
+    let messages = reduceChatStreamEvent(base(), "bot", { type: "trace", text: "主管选择 image" });
+    messages = reduceChatStreamEvent(messages, "bot", { type: "delta", text: "完成" });
+
+    expect(messages[0].text).toBe("主管选择 image\n完成");
   });
 
-  it("keeps workflow message order and text placement", () => {
-    const messages = workflowMessages([
-      { id: "1", role: "assistant", text: "prompt", image: "a" },
-      { id: "2", role: "assistant", text: "", image: "b" },
-    ]);
-    expect(messages.map((message) => message.text)).toEqual(["prompt", ""]);
-  });
-
-  it("normalizes inspiration defaults", () => {
-    expect(inspirationMessage({ id: "i", query: "q", prompt: "p", tags: [], sources: [] }))
-      .toMatchObject({ id: "i", inspiration: { query: "q", prompt: "p", tags: [], sources: [] } });
-  });
-
-  it("updates a historical prompt approval by stable approval id", () => {
-    const current = [{
-      id: "message-1", role: "assistant" as const, text: "待审核",
-      promptApproval: {
-        id: "approval-1", messageId: "message-1", kind: "image" as const,
-        originalPrompt: "原稿", prompt: "旧稿", status: "pending" as const,
-      },
-    }];
-    const updated = applyPromptApproval(current, {
-      id: "approval-1", messageId: "message-1", kind: "image",
-      originalPrompt: "原稿", prompt: "用户改稿", status: "pending",
+  it("upserts media by the protocol event id", () => {
+    let messages = reduceChatStreamEvent(base(), "bot", {
+      type: "image", url: "local://first", id: "image-1",
+    });
+    messages = reduceChatStreamEvent(messages, "bot", {
+      type: "image", url: "local://updated", id: "image-1",
     });
 
-    expect(updated[0].promptApproval?.prompt).toBe("用户改稿");
+    expect(messages.filter((message) => message.id === "image-1")).toHaveLength(1);
+    expect(messages.find((message) => message.id === "image-1")?.image).toBe("local://updated");
   });
 
-  it("updates a supervisor route choice by its stable id", () => {
-    const current = [{
-      id: "message-1", role: "assistant" as const, text: "请选择",
-      routeChoice: {
-        id: "route-1", messageId: "message-1", userMessageId: "user-1",
-        status: "pending" as const,
-        options: [{ route: "answer" as const, label: "继续对话" }],
+  it("applies approval updates through one reducer", () => {
+    const current: ChatMessage[] = [{
+      id: "bot", role: "assistant", text: "", promptApproval: {
+        id: "approval-1", messageId: "bot", kind: "image", status: "pending",
+        prompt: "old", originalPrompt: "old",
       },
     }];
-    const updated = applyRouteChoice(current, {
-      ...current[0].routeChoice!,
-      status: "selected",
-      selectedRoute: "answer",
+
+    const messages = reduceChatStreamEvent(current, "bot", {
+      type: "approval",
+      approval: {
+        id: "approval-1", messageId: "bot", kind: "image", status: "cancelled",
+        prompt: "old", originalPrompt: "old",
+      },
     });
 
-    expect(updated[0].routeChoice?.selectedRoute).toBe("answer");
+    expect(messages[0].promptApproval?.status).toBe("cancelled");
   });
 });

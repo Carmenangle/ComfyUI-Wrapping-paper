@@ -1,9 +1,11 @@
 import ipaddress
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
 from app.routers import ai, ai_providers, agents, assets, characters, comfyui, loras, mcp, models, node_manager, rag, runs, skills, user_state, workflows
@@ -61,3 +63,8 @@ app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+_FRONTEND_DIST = Path(os.environ.get("LAF_FRONTEND_DIST", "")).expanduser()
+if str(_FRONTEND_DIST) not in {"", "."} and (_FRONTEND_DIST / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")

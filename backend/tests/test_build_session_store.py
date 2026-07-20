@@ -35,7 +35,7 @@ def test_save_get_roundtrip_preserves_graph():
 
 
 def test_save_overwrites_same_id():
-    meta = bss.save_session("fixed", "v1", [], {"1": {}})
+    bss.save_session("fixed", "v1", [], {"1": {}})
     bss.save_session("fixed", "v2", [], {"1": {}, "2": {}})
     got = bss.get_session("fixed")
     assert got["name"] == "v2"

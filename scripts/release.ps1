@@ -17,6 +17,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
+$backendDir = Join-Path $projectRoot "backend"
 if (-not $Message) { $Message = "release $Version" }
 # Release 正文：优先用 -NotesFile 指向的文件(支持多行/引号/箭头等)，没给就退回单行 $Message
 $notesPath = ""
@@ -33,7 +34,17 @@ if ($RefreshVendor) {
   & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "pack-npm.ps1")
 }
 
-# 2) git 提交(含 vendor)。有改动才提交，没改动跳过。
+# 2) 发布闭包校验：依赖 wheel、CSS 资产引用和主题清单产物必须完整。
+Write-Host "== 发布前置校验 =="
+$preflightPy = Join-Path $backendDir ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $preflightPy)) {
+  $preflightPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+  if (-not $preflightPy) { throw "未找到 python，无法执行发布前置校验" }
+}
+& $preflightPy (Join-Path $PSScriptRoot "release_preflight.py")
+if ($LASTEXITCODE -ne 0) { throw "发布前置校验失败，已阻止生成不完整发布包" }
+
+# 3) git 提交(含 vendor)。有改动才提交，没改动跳过。
 Write-Host "== git 提交 =="
 & git add -A
 & git diff --cached --quiet
@@ -44,7 +55,7 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "无改动，跳过提交。"
 }
 
-# 3) 可选推送
+# 4) 可选推送
 if (-not $NoPush) {
   Write-Host "== git 推送 =="
   $branch = (& git rev-parse --abbrev-ref HEAD).Trim()
@@ -52,7 +63,7 @@ if (-not $NoPush) {
   if ($LASTEXITCODE -ne 0) { throw "git push 失败(检查远端/网络)" }
 }
 
-# 4) 打 zip：git archive 只打 HEAD 里被追踪的文件，天然排除所有 gitignore 内容(隐私零泄漏)
+# 5) 打 zip：git archive 只打 HEAD 里被追踪的文件，天然排除所有 gitignore 内容(隐私零泄漏)
 Write-Host "== 打包 zip =="
 $zipName = "ComfyUI-Wrapping-paper-$Version.zip"
 $zipPath = Join-Path $projectRoot $zipName
@@ -64,7 +75,7 @@ Write-Host ""
 Write-Host "完成：$zipName ($sizeMB MB)"
 Write-Host "该 zip 含代码 + vendor 离线依赖(pip/npm)，不含 backend/data 等隐私文件。"
 
-# 5) 可选：建 tag + 发 GitHub Release 并上传 zip
+# 6) 可选：建 tag + 发 GitHub Release 并上传 zip
 if ($Publish) {
   if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "未找到 gh，请先安装 GitHub CLI 并 gh auth login" }
   Write-Host ""

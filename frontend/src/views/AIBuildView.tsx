@@ -6,14 +6,15 @@ import { useSettings, activeChatModel } from "../stores/settings";
 import {
   buildWorkflow, buildModule, buildDirect, buildPlan, saveWorkflow, syncNodes,
   listSkeletons, skeletonGraph, type Skeleton,
-  listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta,
+  listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta, type BuildTurn,
 } from "../api/ai";
 import { fullUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { useBuildSession } from "../lib/useBuildSession";
+import { confirmedPlanExecution } from "../lib/workflowBuildExecution";
 
 // 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
 // pendingNeed=点同意时真正搭建用的需求(原需求+方案)；planText=纯方案文本，供「编辑」填回输入框改。
-interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; editing?: boolean; missingNodes?: string[]; alternatives?: Record<string, string[]>; retryNeed?: string; }
+interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; planOriginalNeed?: string; editing?: boolean; missingNodes?: string[]; alternatives?: Record<string, string[]>; retryNeed?: string; }
 
 // AI 搭工作流（双栏）：左栏多轮对话与 AI 探讨，右栏完整功能 ComfyUI 画布。
 // AI 每轮读回右侧画布作上下文 → 输出完整 graph → 写入右侧；用户可在画布里手动接着改。
@@ -277,6 +278,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const doSend = async () => {
     const need = input.trim();
     setInput("");
+    const history: BuildTurn[] = msgs
+      .map(({ role, text }) => ({ role: role as BuildTurn["role"], text }));
     push("user", need);
     setBusy(true);
     setNote("");
@@ -286,11 +289,14 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       if (advisor) {
         // 顾问模式：先出人话方案，不改画布；「同意执行」时让搭建**照这段方案**来（原需求+方案一起）
         const current = await readGraph();
-        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, signal: ac.signal });
-        const planNeed = `${need}\n\n【已和用户确认的搭建方案，请严格照此搭建】\n${r.plan}`;
-        setMsgs((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: r.plan, pendingNeed: planNeed, planText: r.plan }]);
+        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, history, signal: ac.signal });
+        const execution = confirmedPlanExecution(need, r.plan);
+        setMsgs((m) => [...m, {
+          id: crypto.randomUUID(), role: "assistant", text: r.plan,
+          pendingNeed: execution.need, planText: r.plan, planOriginalNeed: need,
+        }]);
       } else {
-        await doExecute(need, ac.signal);
+        await doExecute(need, ac.signal, history);
       }
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
@@ -302,7 +308,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
 
   // 真正生成并写入画布（直接模式直接调；顾问模式由「同意执行」按钮调）
   // signal 为空时自建一个 AbortController 并登记，让“停止”按钮也能中止这些内部入口
-  const doExecute = async (need: string, signal?: AbortSignal) => {
+  const doExecute = async (need: string, signal?: AbortSignal, historyOverride?: BuildTurn[]) => {
     let sig = signal;
     if (!sig) {
       const ac = new AbortController();
@@ -311,17 +317,19 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     }
     const current = await readGraph();               // 带上当前画布作上下文
     const hasNodes = Object.keys(current).length > 0;
+    const history: BuildTurn[] = historyOverride || msgs.map(({ role, text }) => ({ role, text }));
     // 精简直连(默认)：只调1次模型，信任Opus一次到位，最快不超时——优先走它。
     // 否则按增量/整图老路（多层校验自修，慢但对弱模型稳）。
     // 不传 proxy 给对话模型：与仓库对话同路径（默认 httpx 读系统环境），强行代理反而切断中转连接
     const r = direct
-      ? await buildDirect({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: hasNodes ? current : undefined, signal: sig })
+      ? await buildDirect({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: hasNodes ? current : undefined, history, signal: sig })
       : incremental && hasNodes
-      ? await buildModule({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, signal: sig })
+      ? await buildModule({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, history, signal: sig })
       : await buildWorkflow({
           need, chat, embed: settings.embedModel,
           comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir,
           currentGraph: current, save: false,  // 迭代中途不落盘，只回图写画布
+          history,
           signal: sig,
         });
     const miss = r.missing_nodes && r.missing_nodes.length ? r.missing_nodes : undefined;
@@ -373,7 +381,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     setBusy(true);
     setNote("");
     try {
-      await doExecute(need);
+      await doExecute(need, undefined, []);
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
     } finally {
@@ -515,9 +523,9 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
                         <button className="btn primary" disabled={busy}
                           onClick={() => {
                             const plan = (m.planText ?? m.text);
-                            const need = `请严格照以下方案搭建：\n${plan}`;
+                            const execution = confirmedPlanExecution(m.planOriginalNeed || "按确认方案整理当前工作流", plan);
                             setMsgs((arr) => arr.map((x) => (x.id === m.id ? { ...x, editing: false, text: plan, pendingNeed: undefined } : x)));
-                            approvePlan(m.id, need);
+                            approvePlan(m.id, execution.need);
                           }}>
                           <Sparkles size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />保存并执行
                         </button>

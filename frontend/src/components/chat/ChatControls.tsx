@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Ratio } from "lucide-react";
 import {
-  ASPECTS, CUSTOM_SIZE_MAX, CUSTOM_SIZE_MIN, IMAGE_QUALITIES, RES_TIERS,
+  ASPECTS, CUSTOM_SIZE_MAX, CUSTOM_SIZE_MIN, IMAGE_QUALITIES, IMAGE_SIZE_STEP, RES_TIERS,
   resolveImageSize, type ImageQuality,
 } from "../../lib/viewRouting";
 
@@ -142,6 +142,7 @@ export function SizeSwitcher({
                   type="number"
                   min={CUSTOM_SIZE_MIN}
                   max={CUSTOM_SIZE_MAX}
+                  step={IMAGE_SIZE_STEP}
                   value={widthText}
                   aria-label="自定义图片宽度"
                   onChange={(event) => setWidthText(event.target.value)}
@@ -152,6 +153,7 @@ export function SizeSwitcher({
                   type="number"
                   min={CUSTOM_SIZE_MIN}
                   max={CUSTOM_SIZE_MAX}
+                  step={IMAGE_SIZE_STEP}
                   value={heightText}
                   aria-label="自定义图片高度"
                   onChange={(event) => setHeightText(event.target.value)}
@@ -196,24 +198,6 @@ export function SizeSwitcher({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// 首页空态落地：二次元网格风。超大描边标题压顶 + 网点铺底 + 提示。
-export function ChatEmptyLanding() {
-  return (
-    <div className="chat-landing dot-grid">
-      <div className="hero-title chat-landing-hero">STUDIO</div>
-      <img
-        className="chat-landing-hostess"
-        src="/support/eye-care/168/hostess-main.png"
-        alt=""
-        aria-hidden="true"
-      />
-      <p className="chat-landing-hint">
-        描述你想要的画面，或直接和 AI 对话。输入 <code>/w</code> 选择工作流模板。
-      </p>
     </div>
   );
 }

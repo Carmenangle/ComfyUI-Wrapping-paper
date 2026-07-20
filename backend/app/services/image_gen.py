@@ -17,6 +17,7 @@ _LOG = logging.getLogger(__name__)
 _QUALITIES = {"auto", "low", "medium", "high"}
 _SIZE_MIN = 64
 _SIZE_MAX = 3840
+_SIZE_STEP = 16
 
 
 class UpstreamDeliveryUnknown(RuntimeError):
@@ -34,6 +35,8 @@ def _validated_size(size: str) -> str:
     width, height = (int(value) for value in match.groups())
     if not (_SIZE_MIN <= width <= _SIZE_MAX and _SIZE_MIN <= height <= _SIZE_MAX):
         raise ValueError(f"图片宽高必须在 {_SIZE_MIN}–{_SIZE_MAX}px 之间")
+    width = ((width + _SIZE_STEP // 2) // _SIZE_STEP) * _SIZE_STEP
+    height = ((height + _SIZE_STEP // 2) // _SIZE_STEP) * _SIZE_STEP
     return f"{width}x{height}"
 
 
@@ -180,10 +183,11 @@ def generate(base_url: str, api_key: str, model: str, prompt: str,
 
 def generate_with_images(base_url: str, api_key: str, model: str, prompt: str,
                          images: list[str], size: str = "1024x1024",
-                         quality: str = "high") -> str:
+                         quality: str = "high", mask: str | None = None) -> str:
     """图生图：把提示词 + 一张或多张参考图交给 images/edits 接口，返回图片地址。
 
-    走 OpenAI 官方 multipart/form-data，多图用同名 image[] 字段全部上传。
+    走 OpenAI 官方 multipart/form-data，多图用同名 image[] 字段全部上传；
+    原生局部编辑时把独立 Alpha 蒙版放在 mask 字段，透明区域表示允许修改。
     失败抛异常，由调用方（工具）捕获转成错误文本。
     """
     if not base_url or not model:
@@ -201,12 +205,16 @@ def generate_with_images(base_url: str, api_key: str, model: str, prompt: str,
         data, name, mime = _load_image_bytes(img)
         upload_bytes += len(data)
         files.append(("image[]", (name, data, mime)))
+    if mask:
+        mask_data, mask_name, mask_mime = _load_image_bytes(mask)
+        upload_bytes += len(mask_data)
+        files.append(("mask", (f"mask_{mask_name}", mask_data, mask_mime)))
     payload = {"model": model, "prompt": prompt, "n": "1", "size": size,
                "moderation": "low", **_quality_payload(model, quality)}
     started = time.monotonic()
     _LOG.info(
-        "image request start request_id=%s endpoint=edits model=%s size=%s quality=%s images=%d bytes=%d",
-        request_id, model, size, quality, len(images), upload_bytes,
+        "image request start request_id=%s endpoint=edits model=%s size=%s quality=%s images=%d mask=%s bytes=%d",
+        request_id, model, size, quality, len(images), bool(mask), upload_bytes,
     )
     with httpx.Client(trust_env=False, timeout=_request_timeout(size)) as c:
         try:

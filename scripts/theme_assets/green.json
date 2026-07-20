@@ -1,0 +1,79 @@
+{
+  "theme": "green",
+  "steps": [
+    {"op":"webp","source":"green群青真丝绡无缝纹理.png","target":"textures/green/cobalt-silk-tile.webp","mode":"mirror_tile","lossless":true},
+    {"op":"webp","source":"green翡翠丝毛绉无缝纹理.png","target":"textures/green/jade-crepe-tile.webp","mode":"mirror_tile","lossless":true},
+    {"op":"webp","source":"green极简潮汐叶脉对话背景.png","target":"backgrounds/green/chat-tide-vein.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"green陆海共生研究院中庭对话背景.png","target":"backgrounds/green/chat-institute-atrium.webp","mode":"fit","size":[3840,2160],"quality":90},
+    {"op":"webp","source":"green潮汐叶脉横条.png","target":"textures/green/tide-vein-strip.webp","mode":"crop_resize","preprocess":"white_to_alpha","box":[0,290,-1,530],"visible":true,"padding":4,"size":[1536,192],"lossless":true},
+
+    {"op":"png","id":"calyx-atlas","source":"green花萼叶鞘角饰图集.png","target":"ornaments/green/calyx-corners.png","preprocess":"clean_alpha","size":[2048,2048]},
+    {"op":"png","id":"calyx-vine","source":"green花萼叶鞘角饰图集.png","target":"ornaments/green/calyx-corner-vine.png","preprocess":"clean_alpha","box":[55,50,560,555],"visible":true,"padding":6},
+    {"op":"png","id":"calyx-cut","source":"green花萼叶鞘角饰图集.png","target":"ornaments/green/calyx-corner-cut.png","preprocess":"clean_alpha","box":[760,70,1180,555],"visible":true,"padding":6},
+    {"op":"png","id":"calyx-gem","source":"green花萼叶鞘角饰图集.png","target":"ornaments/green/calyx-corner-gem.png","preprocess":"clean_alpha","box":[80,680,570,1160],"visible":true,"padding":6},
+    {"op":"png","id":"calyx-floral","source":"green花萼叶鞘角饰图集.png","target":"ornaments/green/calyx-corner-floral.png","preprocess":"clean_alpha","box":[700,680,1180,1160],"visible":true,"padding":6},
+
+    {"op":"png","id":"divider-single","source":"green分隔线与种核节点图集.png","target":"ornaments/green/divider-single.png","preprocess":"white_to_alpha","box":[75,55,1460,185],"visible":true,"padding":6},
+    {"op":"png","id":"divider-double","source":"green分隔线与种核节点图集.png","target":"ornaments/green/divider-double.png","preprocess":"white_to_alpha","box":[75,135,1460,205],"visible":true,"padding":6},
+    {"op":"png","id":"divider-node","source":"green分隔线与种核节点图集.png","target":"ornaments/green/divider-node.png","preprocess":"white_to_alpha","box":[75,220,1460,285],"visible":true,"padding":6},
+    {"op":"png","id":"divider-wave","source":"green分隔线与种核节点图集.png","target":"ornaments/green/divider-wave.png","preprocess":"white_to_alpha","box":[75,295,1460,545],"visible":true,"padding":6},
+    {"op":"png","id":"divider-strip","source":"green分隔线与种核节点图集.png","target":"ornaments/green/divider-strip.png","preprocess":"white_to_alpha","box":[75,555,1460,640],"visible":true,"padding":6},
+    {"op":"png","id":"node-default","source":"green分隔线与种核节点图集.png","target":"ornaments/green/node-default.png","preprocess":"white_to_alpha","box":[925,775,1010,855],"visible":true,"padding":4},
+    {"op":"png","id":"node-active","source":"green分隔线与种核节点图集.png","target":"ornaments/green/node-active.png","preprocess":"white_to_alpha","box":[1015,775,1100,855],"visible":true,"padding":4},
+    {"op":"png","id":"node-success","source":"green分隔线与种核节点图集.png","target":"ornaments/green/node-success.png","preprocess":"white_to_alpha","box":[1105,775,1190,855],"visible":true,"padding":4},
+    {"op":"png","id":"node-warning","source":"green分隔线与种核节点图集.png","target":"ornaments/green/node-warning.png","preprocess":"white_to_alpha","box":[1195,775,1280,855],"visible":true,"padding":4},
+    {"op":"png","id":"node-error","source":"green分隔线与种核节点图集.png","target":"ornaments/green/node-error.png","preprocess":"white_to_alpha","box":[1285,775,1370,855],"visible":true,"padding":4},
+    {"op":"atlas","target":"ornaments/green/dividers-and-nodes.png","size":[2048,1024],"items":[
+      {"ref":"divider-single","box":[50,20,1998,110]}, {"ref":"divider-double","box":[50,130,1998,220]},
+      {"ref":"divider-node","box":[50,240,1998,330]}, {"ref":"divider-wave","box":[50,350,1998,500]},
+      {"ref":"divider-strip","box":[50,520,1998,620]}, {"ref":"node-default","box":[820,780,960,960]},
+      {"ref":"node-active","box":[980,780,1120,960]}, {"ref":"node-success","box":[1140,780,1280,960]},
+      {"ref":"node-warning","box":[1300,780,1440,960]}, {"ref":"node-error","box":[1460,780,1600,960]}
+    ]},
+
+    {"op":"png","id":"button-main-default","source":"green按钮状态表面图集.png","target":"controls/green/button-main-default.png","preprocess":"clean_alpha","box":[80,40,790,250],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-hover","source":"green按钮状态表面图集.png","target":"controls/green/button-main-hover.png","preprocess":"clean_alpha","box":[80,255,790,465],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-pressed","source":"green按钮状态表面图集.png","target":"controls/green/button-main-pressed.png","preprocess":"clean_alpha","box":[80,470,790,680],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-main-disabled","source":"green按钮状态表面图集.png","target":"controls/green/button-main-disabled.png","preprocess":"clean_alpha","box":[80,690,790,900],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-default","source":"green按钮状态表面图集.png","target":"controls/green/button-secondary-default.png","preprocess":"clean_alpha","box":[850,40,1590,250],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-hover","source":"green按钮状态表面图集.png","target":"controls/green/button-secondary-hover.png","preprocess":"clean_alpha","box":[850,255,1590,465],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-pressed","source":"green按钮状态表面图集.png","target":"controls/green/button-secondary-pressed.png","preprocess":"clean_alpha","box":[850,470,1590,680],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"png","id":"button-secondary-disabled","source":"green按钮状态表面图集.png","target":"controls/green/button-secondary-disabled.png","preprocess":"clean_alpha","box":[850,690,1590,900],"visible":true,"padding":2,"transform":"edge_overlay"},
+    {"op":"atlas","target":"controls/green/button-state-overlays.png","size":[2048,1024],"items":[
+      {"ref":"button-main-default","box":[16,32,496,480]}, {"ref":"button-main-hover","box":[528,32,1008,480]},
+      {"ref":"button-main-pressed","box":[1040,32,1520,480]}, {"ref":"button-main-disabled","box":[1552,32,2032,480]},
+      {"ref":"button-secondary-default","box":[16,544,496,992]}, {"ref":"button-secondary-hover","box":[528,544,1008,992]},
+      {"ref":"button-secondary-pressed","box":[1040,544,1520,992]}, {"ref":"button-secondary-disabled","box":[1552,544,2032,992]}
+    ]},
+
+    {"op":"png","id":"message-assistant","source":"green消息表面纹理图集.png","target":"controls/green/message-assistant.png","preprocess":"clean_alpha","box":[210,5,815,515],"visible":true,"padding":2},
+    {"op":"png","id":"message-user","source":"green消息表面纹理图集.png","target":"controls/green/message-user.png","preprocess":"clean_alpha","box":[210,515,815,1020],"visible":true,"padding":2},
+    {"op":"png","id":"message-system","source":"green消息表面纹理图集.png","target":"controls/green/message-system.png","preprocess":"clean_alpha","box":[210,1020,815,1530],"visible":true,"padding":2},
+    {"op":"atlas","target":"controls/green/message-surface-overlays.png","size":[2048,1024],"items":[
+      {"ref":"message-assistant","box":[24,38,658,986]}, {"ref":"message-user","box":[706,38,1340,986]},
+      {"ref":"message-system","box":[1388,38,2022,986]}
+    ]},
+
+    {"op":"png","id":"composer-top","source":"green输入区与拖动手柄边饰.png","target":"controls/green/composer-top.png","preprocess":"white_to_alpha","box":[75,145,1625,315],"visible":true,"padding":6},
+    {"op":"png","id":"composer-handle","source":"green输入区与拖动手柄边饰.png","target":"controls/green/composer-handle.png","preprocess":"white_to_alpha","box":[430,445,1250,555],"visible":true,"padding":6},
+    {"op":"png","id":"composer-divider","source":"green输入区与拖动手柄边饰.png","target":"controls/green/composer-divider.png","preprocess":"white_to_alpha","box":[100,700,1600,800],"visible":true,"padding":6},
+    {"op":"atlas","target":"controls/green/composer-ornaments.png","size":[2048,512],"items":[
+      {"ref":"composer-top","box":[70,20,1978,150]}, {"ref":"composer-handle","box":[760,170,1288,330]},
+      {"ref":"composer-divider","box":[70,350,1978,492]}
+    ]},
+    {"op":"png","source":"green空状态共生徽记.png","target":"ornaments/green/empty-state-symbiosis.png","preprocess":"clean_alpha","size":[1024,1024]},
+
+    {"op":"png","source":"green默认.png","target":"support/green/hostess-main.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"green聆听.png","target":"support/green/hostess-listening.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"green思考.png","target":"support/green/hostess-thinking.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"green完成.png","target":"support/green/hostess-success.png","preprocess":"clean_alpha","size":[1024,1024]},
+    {"op":"png","source":"green默认.png","target":"support/green/168/hostess-main.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"green聆听.png","target":"support/green/168/hostess-listening.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"green思考.png","target":"support/green/168/hostess-thinking.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"green完成.png","target":"support/green/168/hostess-success.png","preprocess":"clean_alpha","size":[168,168]},
+    {"op":"png","source":"green默认.png","target":"support/green/112/hostess-main.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"green聆听.png","target":"support/green/112/hostess-listening.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"green思考.png","target":"support/green/112/hostess-thinking.png","preprocess":"clean_alpha","size":[112,112]},
+    {"op":"png","source":"green完成.png","target":"support/green/112/hostess-success.png","preprocess":"clean_alpha","size":[112,112]}
+  ]
+}

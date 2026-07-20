@@ -36,11 +36,13 @@ def _clear_after_success(thread_id: str, approval_id: str) -> None:
 
 
 def save_prompt_review(ctx: Any, kind: str, original: str, candidate: str,
-                       images: list[str], reason: str) -> dict:
+                       images: list[str], reason: str,
+                       image_mask: dict[str, str] | None = None) -> dict:
     item = prompt_approval_store.set(ctx["thread_id"], {
         "stage": "prompt_review", "kind": kind, "reason": reason,
         "original_prompt": original, "candidate_prompt": candidate,
-        "images": images or [], "message_id": ctx.get("message_id", ""),
+        "images": images or [], "image_mask": image_mask,
+        "message_id": ctx.get("message_id", ""),
     })
     return {
         "result_text": _review_text(retry=reason == "compatibility"),
@@ -51,7 +53,8 @@ def save_prompt_review(ctx: Any, kind: str, original: str, candidate: str,
 
 def _save_rewrite_consent(ctx: Any, kind: str, original: str, submitted: str,
                           images: list[str], error: Exception, trace: list[str],
-                          approval_id: str = "") -> dict:
+                          approval_id: str = "",
+                          image_mask: dict[str, str] | None = None) -> dict:
     error_text = str(error)
     existing = prompt_approval_store.get(ctx["thread_id"], approval_id) if approval_id else None
     item = prompt_approval_store.set(ctx["thread_id"], {
@@ -59,7 +62,7 @@ def _save_rewrite_consent(ctx: Any, kind: str, original: str, submitted: str,
         **({"id": approval_id} if approval_id else {}),
         "stage": "rewrite_consent", "kind": kind,
         "original_prompt": original, "candidate_prompt": submitted,
-        "images": images or [], "error": error_text,
+        "images": images or [], "image_mask": image_mask, "error": error_text,
         "message_id": (existing or {}).get("message_id", ctx.get("message_id", "")),
     })
     return {
@@ -75,7 +78,8 @@ def _save_rewrite_consent(ctx: Any, kind: str, original: str, submitted: str,
 
 def _save_delivery_unknown(ctx: Any, kind: str, original: str, submitted: str,
                            images: list[str], error: Exception, trace: list[str],
-                           approval_id: str = "") -> dict:
+                           approval_id: str = "",
+                           image_mask: dict[str, str] | None = None) -> dict:
     error_text = str(error)
     existing = prompt_approval_store.get(ctx["thread_id"], approval_id) if approval_id else None
     item = prompt_approval_store.set(ctx["thread_id"], {
@@ -83,7 +87,7 @@ def _save_delivery_unknown(ctx: Any, kind: str, original: str, submitted: str,
         **({"id": approval_id} if approval_id else {}),
         "stage": "delivery_unknown", "kind": kind, "reason": "delivery_unknown",
         "original_prompt": original, "candidate_prompt": submitted,
-        "images": images or [], "error": error_text,
+        "images": images or [], "image_mask": image_mask, "error": error_text,
         "message_id": (existing or {}).get("message_id", ctx.get("message_id", "")),
     })
     return {
@@ -99,7 +103,8 @@ def _save_delivery_unknown(ctx: Any, kind: str, original: str, submitted: str,
 
 def _save_request_not_sent(ctx: Any, kind: str, original: str, submitted: str,
                            images: list[str], error: Exception, trace: list[str],
-                           approval_id: str = "") -> dict:
+                           approval_id: str = "",
+                           image_mask: dict[str, str] | None = None) -> dict:
     error_text = str(error)
     existing = prompt_approval_store.get(ctx["thread_id"], approval_id) if approval_id else None
     item = prompt_approval_store.set(ctx["thread_id"], {
@@ -107,7 +112,7 @@ def _save_request_not_sent(ctx: Any, kind: str, original: str, submitted: str,
         **({"id": approval_id} if approval_id else {}),
         "stage": "request_failed", "kind": kind, "reason": "upstream_unreachable",
         "original_prompt": original, "candidate_prompt": submitted,
-        "images": images or [], "error": error_text,
+        "images": images or [], "image_mask": image_mask, "error": error_text,
         "message_id": (existing or {}).get("message_id", ctx.get("message_id", "")),
     })
     return {
@@ -129,7 +134,8 @@ def _image_context(ctx: Any):
 
 
 def execute_generation(ctx: Any, kind: str, original: str, prompt: str,
-                       images: list[str], trace: list[str], approval_id: str = "") -> dict:
+                       images: list[str], trace: list[str], approval_id: str = "",
+                       image_mask: dict[str, str] | None = None) -> dict:
     try:
         if kind == "video":
             url = video_gen.generate(ctx["vid_base"], ctx["vid_key"], ctx["vid_model"],
@@ -145,11 +151,16 @@ def execute_generation(ctx: Any, kind: str, original: str, prompt: str,
             if not images:
                 raise RuntimeError("未找到参考图，无法图生图")
             gb, gk, gm, tid, rid, od, eb, ek, em = _image_context(ctx)
-            url = image_gen.generate_with_images(gb, gk, gm, prompt, images,
-                                                 size=ctx.get("size", "1024x1024"),
-                                                 quality=ctx.get("image_quality", "high"))
+            kwargs = {
+                "size": ctx.get("size", "1024x1024"),
+                "quality": ctx.get("image_quality", "high"),
+            }
+            if image_mask:
+                kwargs["mask"] = image_mask.get("mask", "")
+            url = image_gen.generate_with_images(gb, gk, gm, prompt, images, **kwargs)
             regeneration = {
                 "kind": "ai-image", "prompt": prompt, "images": list(images),
+                **({"imageMask": image_mask} if image_mask else {}),
                 "size": ctx.get("size", "1024x1024"),
                 "quality": ctx.get("image_quality", "high"),
                 "model": {"baseUrl": gb, "modelName": gm},
@@ -182,11 +193,17 @@ def execute_generation(ctx: Any, kind: str, original: str, prompt: str,
                 "image_recs": [rec], "trace": trace,
                 **({"approval": _approval_payload(approved or {}, "submitted")} if approved else {})}
     except image_gen.UpstreamRequestNotSent as exc:
-        return _save_request_not_sent(ctx, kind, original, prompt, images, exc, trace, approval_id)
+        return _save_request_not_sent(
+            ctx, kind, original, prompt, images, exc, trace, approval_id, image_mask,
+        )
     except image_gen.UpstreamDeliveryUnknown as exc:
-        return _save_delivery_unknown(ctx, kind, original, prompt, images, exc, trace, approval_id)
+        return _save_delivery_unknown(
+            ctx, kind, original, prompt, images, exc, trace, approval_id, image_mask,
+        )
     except Exception as exc:  # noqa: BLE001
-        return _save_rewrite_consent(ctx, kind, original, prompt, images, exc, trace, approval_id)
+        return _save_rewrite_consent(
+            ctx, kind, original, prompt, images, exc, trace, approval_id, image_mask,
+        )
 
 
 def _approval_action(text: str) -> str:
@@ -251,6 +268,7 @@ def handle_pending(context: Any, rewrite_prompt: Callable[[Any, str], str]) -> l
             context, pending.get("kind", "image"),
             pending.get("original_prompt", ""), pending.get("candidate_prompt", ""),
             pending.get("images") or [], ["✅ 用户已审核并确认提交"], approval_id,
+            pending.get("image_mask"),
         )
         return _result_events(result)
 

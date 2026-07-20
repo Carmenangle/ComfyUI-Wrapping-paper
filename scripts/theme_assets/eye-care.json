@@ -1,0 +1,68 @@
+{
+  "theme": "eye-care",
+  "steps": [
+    {"op":"webp","source":["象牙纸面无缝纹理.png","eye-care象牙纸面无缝纹理.png"],"target":"textures/eye-care/ivory-paper-tile.webp","mode":"resize","size":[1024,1024],"lossless":true,"quality":90},
+    {"op":"webp","source":["鼠尾草斜纹无缝纹理.png","eye-care鼠尾草斜纹无缝纹理.png"],"target":"textures/eye-care/sage-twill-tile.webp","mode":"resize","size":[1024,1024],"lossless":true,"quality":90},
+    {"op":"webp","source":["文学学院对话背景.png","eye-care文学学院对话背景.png"],"target":"backgrounds/eye-care/chat-literature-study.webp","mode":"resize","size":[3840,2160],"quality":90},
+    {"op":"webp","source":["极简刺绣对话背景.png","eye-care极简刺绣对话背景.png"],"target":"backgrounds/eye-care/chat-embroidery-paper.webp","mode":"resize","size":[3840,2160],"quality":90},
+    {"op":"webp","source":["深茶皮革压线条.png","eye-care深茶皮革压线条.png"],"target":"textures/eye-care/leather-stitch-strip.webp","mode":"dark_row_strip","size":[1536,192],"aspect":8,"threshold":10,"quality":92},
+
+    {"op":"png","id":"gold-atlas","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-corners.png","size":[2048,2048]},
+    {"op":"png","id":"gold-vine","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-corner-vine.png","box":[90,60,590,510],"visible":true,"padding":6},
+    {"op":"png","id":"gold-lace","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-corner-lace.png","box":[620,60,1165,510],"visible":true,"padding":6},
+    {"op":"png","id":"gold-gem","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-corner-gem.png","box":[90,500,590,990],"visible":true,"padding":6},
+    {"op":"png","id":"gold-double","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-corner-double.png","box":[620,500,1165,990],"visible":true,"padding":6},
+    {"op":"png","id":"gold-leaf","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-endpoint-leaf.png","box":[90,1010,590,1185],"visible":true,"padding":6},
+    {"op":"png","id":"gold-diamond","source":["古金角饰图集.png","eye-care古金角饰图集.png"],"target":"ornaments/eye-care/gold-endpoint-diamond.png","box":[620,1010,1165,1185],"visible":true,"padding":6},
+
+    {"op":"png","id":"divider-single","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-single.png","preprocess":"white_to_alpha","box":[65,65,1605,150],"visible":true,"padding":6},
+    {"op":"png","id":"divider-double","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-double.png","preprocess":"white_to_alpha","box":[65,185,1605,275],"visible":true,"padding":6},
+    {"op":"png","id":"divider-gem","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-gem.png","preprocess":"white_to_alpha","box":[65,305,1605,405],"visible":true,"padding":6},
+    {"op":"png","id":"divider-leaves","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-leaves.png","preprocess":"white_to_alpha","box":[65,425,1605,520],"visible":true,"padding":6},
+    {"op":"png","id":"divider-leather","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-leather.png","preprocess":"white_to_alpha","box":[65,535,1605,630],"visible":true,"padding":6},
+    {"op":"png","id":"divider-lace","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/divider-lace.png","preprocess":"white_to_alpha","box":[65,650,1605,745],"visible":true,"padding":6},
+    {"op":"png","id":"node-default","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/node-default.png","preprocess":"white_to_alpha","box":[430,765,555,900],"visible":true,"padding":6},
+    {"op":"png","id":"node-active","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/node-active.png","preprocess":"white_to_alpha","box":[660,765,785,900],"visible":true,"padding":6},
+    {"op":"png","id":"node-success","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/node-success.png","preprocess":"white_to_alpha","box":[890,765,1015,900],"visible":true,"padding":6},
+    {"op":"png","id":"node-warning","source":["分隔线与状态节点图集.png","eye-care分隔线与状态节点图集.png"],"target":"ornaments/eye-care/node-warning.png","preprocess":"white_to_alpha","box":[1120,765,1245,900],"visible":true,"padding":6},
+    {"op":"atlas","target":"ornaments/eye-care/dividers-and-nodes.png","size":[2048,1024],"items":[
+      {"ref":"divider-single","box":[60,30,1988,135]}, {"ref":"divider-double","box":[60,155,1988,260]},
+      {"ref":"divider-gem","box":[60,280,1988,385]}, {"ref":"divider-leaves","box":[60,405,1988,510]},
+      {"ref":"divider-leather","box":[60,530,1988,635]}, {"ref":"divider-lace","box":[60,655,1988,760]},
+      {"ref":"node-default","box":[570,800,710,960]}, {"ref":"node-active","box":[800,800,940,960]},
+      {"ref":"node-success","box":[1030,800,1170,960]}, {"ref":"node-warning","box":[1260,800,1400,960]}
+    ]},
+
+    {"op":"png","id":"button-main-default","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-main-default.png","box":[20,105,610,335],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-main-hover","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-main-hover.png","box":[20,370,610,610],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-main-pressed","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-main-pressed.png","box":[20,640,610,885],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-main-disabled","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-main-disabled.png","box":[20,915,610,1160],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-secondary-default","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-secondary-default.png","box":[635,105,1235,335],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-secondary-hover","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-secondary-hover.png","box":[635,370,1235,610],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-secondary-pressed","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-secondary-pressed.png","box":[635,640,1235,885],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"png","id":"button-secondary-disabled","source":["按钮状态纹理图集.png","eye-care按钮状态纹理图集.png"],"target":"controls/eye-care/button-secondary-disabled.png","box":[635,915,1235,1160],"visible":true,"padding":2,"transform":"button_surface"},
+    {"op":"atlas","target":"controls/eye-care/button-state-overlays.png","size":[2048,1024],"items":[
+      {"ref":"button-main-default","box":[16,32,496,480]}, {"ref":"button-main-hover","box":[528,32,1008,480]},
+      {"ref":"button-main-pressed","box":[1040,32,1520,480]}, {"ref":"button-main-disabled","box":[1552,32,2032,480]},
+      {"ref":"button-secondary-default","box":[16,544,496,992]}, {"ref":"button-secondary-hover","box":[528,544,1008,992]},
+      {"ref":"button-secondary-pressed","box":[1040,544,1520,992]}, {"ref":"button-secondary-disabled","box":[1552,544,2032,992]}
+    ]},
+
+    {"op":"png","id":"message-assistant","source":["消息气泡纹理图集.png","eye-care消息气泡纹理图集.png"],"target":"controls/eye-care/message-assistant.png","box":[55,55,770,665],"visible":true,"padding":2},
+    {"op":"png","id":"message-user","source":["消息气泡纹理图集.png","eye-care消息气泡纹理图集.png"],"target":"controls/eye-care/message-user.png","box":[55,655,770,1270],"visible":true,"padding":2},
+    {"op":"png","id":"message-system","source":["消息气泡纹理图集.png","eye-care消息气泡纹理图集.png"],"target":"controls/eye-care/message-system.png","box":[55,1260,770,1880],"visible":true,"padding":2},
+    {"op":"atlas","target":"controls/eye-care/message-surface-overlays.png","size":[2048,1024],"items":[
+      {"ref":"message-assistant","box":[24,38,658,986]}, {"ref":"message-user","box":[706,38,1340,986]},
+      {"ref":"message-system","box":[1388,38,2022,986]}
+    ]},
+
+    {"op":"png","id":"composer-top","source":["输入区与拖动手柄边饰.png","输入区与拖动手柄边饰1.png","eye-care输入区与拖动手柄边饰.png"],"target":"controls/eye-care/composer-top.png","preprocess":"white_to_alpha","box":[35,410,855,535],"visible":true,"padding":6},
+    {"op":"png","id":"composer-handle","source":["输入区与拖动手柄边饰.png","输入区与拖动手柄边饰1.png","eye-care输入区与拖动手柄边饰.png"],"target":"controls/eye-care/composer-handle.png","preprocess":"white_to_alpha","box":[285,760,610,920],"visible":true,"padding":6},
+    {"op":"png","id":"composer-divider","source":["输入区与拖动手柄边饰.png","输入区与拖动手柄边饰1.png","eye-care输入区与拖动手柄边饰.png"],"target":"controls/eye-care/composer-divider.png","preprocess":"white_to_alpha","box":[35,1090,855,1250],"visible":true,"padding":6},
+    {"op":"atlas","target":"controls/eye-care/composer-ornaments.png","size":[2048,512],"items":[
+      {"ref":"composer-top","box":[70,20,1978,150]}, {"ref":"composer-handle","box":[760,170,1288,330]},
+      {"ref":"composer-divider","box":[70,350,1978,492]}
+    ]},
+    {"op":"png","source":["eye-care空状态徽记.png","空状态徽记.png"],"target":"ornaments/eye-care/empty-state-crest.png","preprocess":{"name":"remove_low_alpha_haze","threshold":112},"size":[1024,1024]}
+  ]
+}

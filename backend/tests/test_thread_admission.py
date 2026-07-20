@@ -23,7 +23,7 @@ def test_admit_rejects_same_thread():
 def test_admit_different_threads_independent():
     _fresh()
     a = ta.admit("a", threading.Event())
-    b = ta.admit("b", threading.Event())
+    ta.admit("b", threading.Event())
     assert ta.is_active("a") and ta.is_active("b")
     ta.release(a)
     assert not ta.is_active("a")

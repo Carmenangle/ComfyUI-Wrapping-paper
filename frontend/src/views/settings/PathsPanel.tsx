@@ -37,6 +37,17 @@ export function PathsPanel({ draft, setDraft }: PanelProps) {
         />
       </div>
       <div className="field">
+        <label>ComfyUI Python（可选）</label>
+        <input
+          value={draft.comfyuiPython || ""}
+          onChange={(e) => setDraft((d) => ({ ...d, comfyuiPython: e.target.value }))}
+          placeholder="D:\\ComfyUI\\.venv\\Scripts\\python.exe"
+        />
+        <p className="field-hint">
+          留空时自动查找 ComfyUI 整合包或 .venv/venv；不会使用本工具的 Python。
+        </p>
+      </div>
+      <div className="field">
         <label>
           <input
             type="checkbox"

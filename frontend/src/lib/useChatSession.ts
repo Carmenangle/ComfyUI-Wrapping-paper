@@ -19,6 +19,7 @@ import {
   saveSnapshot, fetchSnapshot, fetchAgentRunning, cancelAgent,
   fetchInspiration, regenerateImage as replayImageGeneration,
 } from "../api/ai";
+import type { ChatStreamEvent } from "../api/chatStreamProtocol";
 import {
   reduce as reduceGen, initialGenState,
   streamingBotId, needsConfirm, runningPromptId, queuedItem,
@@ -30,9 +31,11 @@ import {
   registerPending, unregisterPending, pendingResumeAction, pollSchedule,
   slimSnapshot as slimSnapshotPure,
 } from "./chatGeneration";
-import { agentImageMessage, agentVideoMessage, applyPromptApproval, applyRouteChoice, inspirationMessage, upsertMessages, workflowMessages } from "./chatSessionEvents";
+import {
+  agentImageMessage, applyRouteChoice, reduceChatStreamEvent, upsertMessages, workflowMessages,
+} from "./chatSessionEvents";
 import { recoverCompactedSummaryImage } from "./contextManagement";
-import { recoverAgentRun } from "./agentRecovery";
+import { recoverAgentRun, shouldRecoverAgentRun } from "./agentRecovery";
 import type { ImageQuality } from "./viewRouting";
 import { useChatMaintenance } from "./useChatMaintenance";
 import { resolveImageRegenerationModel, workflowRegenerationSnapshot } from "./regeneration";
@@ -110,6 +113,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text: "", ...msg } as ChatMessage]);
 
   const startAgentRecovery = (targetThread = threadId, targetRepoId = repo?.id) => {
+    if (!shouldRecoverAgentRun(targetThread)) return;
     if (activeThreadRef.current !== targetThread || recoveryActiveRef.current) return;
     const token = ++recoveryTokenRef.current;
     recoveryActiveRef.current = true;
@@ -185,6 +189,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     // 加载兜底的 early-return 之后就永远跑不到，等于后台化失效。
     const maybeStartBgPoll = async () => {
       try {
+        if (!shouldRecoverAgentRun(threadId)) return;
         if (!alive || recoveryActiveRef.current) return;
         const st = await fetchAgentRunning(threadId);
         if (!alive || !st.running) return;
@@ -511,7 +516,9 @@ export function useChatSession(deps: ChatSessionDeps) {
     if (!comfyUp) {
       if (settings.comfyuiPath) {
         pushBot("ComfyUI 未启动，正在尝试自动拉起，请稍候 20~40 秒后重试 /s …");
-        startComfy(settings.comfyuiPath, settings.comfyuiUrl).catch(() => {});
+        startComfy(
+          settings.comfyuiPath, settings.comfyuiUrl, settings.comfyuiPython,
+        ).catch(() => {});
       } else {
         pushBot("ComfyUI 未启动（8188 无响应）。请先启动 ComfyUI，或在「设置」填写 ComfyUI 目录后由工具自动启动。");
       }
@@ -570,7 +577,7 @@ export function useChatSession(deps: ChatSessionDeps) {
   // 发送入口：生成进行中默认进队列，否则直接执行
   const send = (content: RichContent) => {
     const text = content.text.trim();
-    if (!text && content.images.length === 0) return;
+    if (!text && content.images.length === 0 && !content.maskedImage) return;
     atBottomRef.current = true;  // 用户主动发送时强制跟随到底
     if (streamingId || wfRunning) { enqueue(content); return; }
     dispatchSend(content);
@@ -597,7 +604,7 @@ export function useChatSession(deps: ChatSessionDeps) {
   const dispatchSend = (content: RichContent) => {
     const raw = content.text.trim();
     const text = normCmd(raw);  // 指令词大小写归一，参数保持原样
-    if (!raw && content.images.length === 0) return;
+    if (!raw && content.images.length === 0 && !content.maskedImage) return;
     if (routeWorkflowCmd(raw)) return;
     // /压缩 或 /compact：压缩当前对话上下文（AI 触发也可在对话里说"压缩上下文"再点确认）
     if (text === "/压缩" || text === "/compact") { compact(); return; }
@@ -670,10 +677,24 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
   // APPEND5_HERE
 
+  const handleAgentStreamEvent = (botId: string, event: ChatStreamEvent) => {
+    if (event.type === "image" || event.type === "video") {
+      dispatch({ t: "agentImage", botId });
+      if (event.type === "image" && abortRef.current?.botId === botId && repo?.id) {
+        setGeneratedCover(repo.id, event.url);
+      }
+      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
+    }
+    setMessages((current) => reduceChatStreamEvent(current, botId, event));
+  };
+
   // 自由文本 → 多 Agent（Supervisor/LangGraph 编排，多轮上下文）：主管分派→生图/反推/灵感/工具专家。
   // 复用同一套生命周期（消息/图片/状态/落盘），是"前端生命周期与后端 agent 解耦"的体现。
   const runFreeText = (t: string, content?: RichContent) => {
     const images = content?.images || [];
+    const imageMask = content?.maskedImage
+      ? { image: content.maskedImage.image, mask: content.maskedImage.mask }
+      : undefined;
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -690,39 +711,11 @@ export function useChatSession(deps: ChatSessionDeps) {
       { id: botId, role: "assistant", text: "" },
     ]);
     dispatch({ t: "agentStart", botId });  // 进入 agent 态（未出图）
-    const append = (delta: string) =>
-      setMessages((ms) =>
-        ms.map((m) => (m.id === botId ? { ...m, text: m.text + delta } : m)),
-      );
-    const onImage = (shown: string, id?: string, regeneration?: RegenerationSnapshot) => {
-      const ownsCurrentRun = abortRef.current?.botId === botId;
-      dispatch({ t: "agentImage", botId });
-      setMessages((messages) => upsertMessages(
-        messages, [agentImageMessage(shown, id, regeneration)]));
-      if (ownsCurrentRun && repo?.id) setGeneratedCover(repo.id, shown);
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
-    const onVideo = (shown: string, id?: string) => {
-      dispatch({ t: "agentImage", botId });  // 复用「已产出内容」态：打断需二次确认
-      setMessages((messages) => upsertMessages(messages, [agentVideoMessage(shown, id)]));
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
-    const onInspiration = (card: { id?: string; query: string; prompt: string; tags: string[]; sources: { title: string; url: string }[] }) => {
-      setMessages((messages) => upsertMessages(messages, [inspirationMessage(card)]));
-    };
-    const onApproval = (approval: PromptApproval) => {
-      setMessages((messages) => applyPromptApproval(messages, approval));
-    };
-    const onRouteChoice = (choice: RouteChoice) => {
-      setMessages((messages) => applyRouteChoice(messages, choice));
-    };
     const onDone = (err?: string) => {
       dispatch({ t: "agentDone", botId });
       if (abortRef.current?.botId === botId) abortRef.current = null;
       if (err) {
-        setMessages((ms) =>
-          ms.map((m) => (m.id === botId ? { ...m, text: m.text || `对话失败：${err}` } : m)),
-        );
+        handleAgentStreamEvent(botId, { type: "error", message: err });
       }
       startAgentRecovery();
     };
@@ -731,9 +724,8 @@ export function useChatSession(deps: ChatSessionDeps) {
     const abort = multiAgent(
       threadId, t, images, chat, genModel, size,
       {
-        onTrace: (line) => append(`${line}\n`),
-        onDelta: append,
-        onImage, onVideo, onInspiration, onApproval, onRouteChoice, onDone,
+        onEvent: (event) => handleAgentStreamEvent(botId, event),
+        onDone,
       },
       { outputDir: settings.outputDir, repoId: repo?.id || threadId, embed: settings.embedModel,
         proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "", messageId: botId,
@@ -742,6 +734,9 @@ export function useChatSession(deps: ChatSessionDeps) {
         contextMaxTokens: settings.contextMaxTokens,
         imageQuality,
         video: videoModel },
+      undefined,
+      undefined,
+      imageMask,
     );
     abortRef.current = { botId, abort };
   };
@@ -758,41 +753,17 @@ export function useChatSession(deps: ChatSessionDeps) {
       { id: botId, role: "assistant", text: "" },
     ]);
     dispatch({ t: "agentStart", botId });
-    const append = (delta: string) => setMessages((messages) =>
-      messages.map((message) => message.id === botId
-        ? { ...message, text: message.text + delta }
-        : message),
-    );
-    const onApproval = (updated: PromptApproval) => {
-      setMessages((messages) => applyPromptApproval(messages, updated));
-    };
-    const onImage = (url: string, id?: string, regeneration?: RegenerationSnapshot) => {
-      dispatch({ t: "agentImage", botId });
-      setMessages((messages) => upsertMessages(
-        messages, [agentImageMessage(url, id, regeneration)]));
-      if (repo?.id) setGeneratedCover(repo.id, url);
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
-    const onVideo = (url: string, id?: string) => {
-      dispatch({ t: "agentImage", botId });
-      setMessages((messages) => upsertMessages(messages, [agentVideoMessage(url, id)]));
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
     const onDone = (err?: string) => {
       dispatch({ t: "agentDone", botId });
       if (abortRef.current?.botId === botId) abortRef.current = null;
-      if (err) append(`操作失败：${err}`);
+      if (err) handleAgentStreamEvent(botId, { type: "delta", text: `操作失败：${err}` });
       startAgentRecovery();
       resolve();
     };
     const abort = multiAgent(
       threadId, actionText, [], chat, genModel, size,
       {
-        onTrace: (line) => append(`${line}\n`),
-        onDelta: append,
-        onImage,
-        onVideo,
-        onApproval,
+        onEvent: (event) => handleAgentStreamEvent(botId, event),
         onDone,
       },
       {
@@ -825,35 +796,23 @@ export function useChatSession(deps: ChatSessionDeps) {
     const sourceImages = (source.parts || [])
       .filter((part) => part.type === "image" && part.url)
       .map((part) => part.url!);
+    const sourceMaskedPart = (source.parts || []).find(
+      (part) => part.type === "masked-image" && part.image && part.mask,
+    );
+    const sourceImageMask = sourceMaskedPart
+      ? { image: sourceMaskedPart.image!, mask: sourceMaskedPart.mask! }
+      : undefined;
     const selected: RouteChoice = { ...choice, status: "selected", selectedRoute: route };
     setMessages((current) => applyRouteChoice(current, selected));
 
     const botId = crypto.randomUUID();
     setMessages((current) => [...current, { id: botId, role: "assistant", text: "" }]);
     dispatch({ t: "agentStart", botId });
-    const append = (delta: string) => setMessages((current) => current.map((message) =>
-      message.id === botId ? { ...message, text: message.text + delta } : message,
-    ));
-    const onImage = (url: string, id?: string, regeneration?: RegenerationSnapshot) => {
-      dispatch({ t: "agentImage", botId });
-      setMessages((current) => upsertMessages(
-        current, [agentImageMessage(url, id, regeneration)]));
-      if (repo?.id) setGeneratedCover(repo.id, url);
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
-    const onVideo = (url: string, id?: string) => {
-      dispatch({ t: "agentImage", botId });
-      setMessages((current) => upsertMessages(current, [agentVideoMessage(url, id)]));
-      window.dispatchEvent(new CustomEvent("laf-generation-saved", { detail: threadId }));
-    };
-    const onApproval = (approval: PromptApproval) => {
-      setMessages((current) => applyPromptApproval(current, approval));
-    };
     const onDone = (err?: string) => {
       dispatch({ t: "agentDone", botId });
       if (abortRef.current?.botId === botId) abortRef.current = null;
       if (err) {
-        append(`操作失败：${err}`);
+        handleAgentStreamEvent(botId, { type: "delta", text: `操作失败：${err}` });
         setMessages((current) => applyRouteChoice(current, {
           ...choice, status: "pending", selectedRoute: undefined,
         }));
@@ -864,11 +823,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     const abort = multiAgent(
       threadId, source.text, sourceImages, chat, genModel, size,
       {
-        onTrace: (line) => append(`${line}\n`),
-        onDelta: append,
-        onImage,
-        onVideo,
-        onApproval,
+        onEvent: (event) => handleAgentStreamEvent(botId, event),
         onDone,
       },
       {
@@ -886,6 +841,7 @@ export function useChatSession(deps: ChatSessionDeps) {
       },
       undefined,
       { route, userMessageId: source.id },
+      sourceImageMask,
     );
     abortRef.current = { botId, abort };
   });

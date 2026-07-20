@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.services import comfyui_client, template_store, workflow_injector
+from app.services import comfyui_client, reranker, template_store, workflow_injector
 from app.services.comfyui_client import ComfyError
 from app.services.url_guard import validate_comfyui_url
 from app.services.workflow_convert import ui_to_api
@@ -52,6 +52,7 @@ def submit_template(template_id: str, values: dict[str, object], prompt: str,
     )
     if missing:
         raise WorkflowSubmissionError(422, {"missing": missing})
+    reranker.release_accelerator_memory()
     try:
         prompt_id = comfyui_client.submit_prompt(normalized_url, api, client_id)
     except ComfyError as exc:
@@ -65,6 +66,7 @@ def submit_graph(workflow: dict[str, object], url: str, client_id: str = "") -> 
         api = ui_to_api(workflow, normalized_url)
     except Exception as exc:  # noqa: BLE001
         raise WorkflowSubmissionError(400, f"工作流转换失败：{exc}") from exc
+    reranker.release_accelerator_memory()
     try:
         prompt_id = comfyui_client.submit_prompt(normalized_url, api, client_id)
     except ComfyError as exc:

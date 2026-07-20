@@ -29,11 +29,12 @@ export function buildHash(view: View, repoId: string | null): string {
 }
 
 // 比例 + 分辨率档 → 像素宽高。最长边按档位取（1k=1280,2k=2560,4k=3840），
-// 另一边按比例缩放并对齐到最接近的 4 的倍数。返回 "宽x高" 字符串。
+// 另一边按比例缩放并对齐到最接近的 16 的倍数。返回 "宽x高" 字符串。
 export const ASPECTS = ["21:9", "2:1", "16:9", "4:3", "1:1", "3:4", "9:16", "1:2", "9:21"];
 export const RES_TIERS: Record<string, number> = { "1k": 1280, "2k": 2560, "4k": 3840 };
 export const CUSTOM_SIZE_MIN = 64;
 export const CUSTOM_SIZE_MAX = 3840;
+export const IMAGE_SIZE_STEP = 16;
 export const IMAGE_QUALITIES = {
   auto: "自动",
   low: "低",
@@ -50,17 +51,18 @@ export function supportsImageQuality(modelName: string): boolean {
 export function calcSize(aspect: string, tier: string): string {
   const [aw, ah] = aspect.split(":").map(Number);
   const base = RES_TIERS[tier] || 1280;
-  const round4 = (n: number) => Math.max(4, Math.round(n / 4) * 4);
+  const align = (n: number) => Math.max(IMAGE_SIZE_STEP, Math.round(n / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP);
   let w: number, h: number;
   if (aw >= ah) { w = base; h = base * (ah / aw); }  // 横向/方形：最长边=宽
   else { h = base; w = base * (aw / ah); }            // 纵向：最长边=高
-  return `${round4(w)}x${round4(h)}`;
+  return `${align(w)}x${align(h)}`;
 }
 
 export function normalizeCustomDimension(value: unknown, fallback = 1280): number {
-  const parsed = Math.round(Number(value));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(CUSTOM_SIZE_MAX, Math.max(CUSTOM_SIZE_MIN, parsed));
+  const numeric = Number(value);
+  const parsed = Number.isFinite(numeric) ? Math.round(numeric) : Math.round(Number(fallback));
+  const bounded = Math.min(CUSTOM_SIZE_MAX, Math.max(CUSTOM_SIZE_MIN, parsed));
+  return Math.round(bounded / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
 }
 
 export interface ResolvedImageSize {

@@ -75,6 +75,18 @@ export async function slimSnapshot(
       );
       nm = { ...nm, parts };
     }
+    if (nm.parts?.some((part) => part.type === "masked-image")) {
+      const parts = await Promise.all(nm.parts.map(async (part) => {
+        if (part.type !== "masked-image") return part;
+        const [url, image, mask] = await Promise.all([
+          part.url ? persist(part.url) : Promise.resolve(part.url),
+          part.image ? persist(part.image) : Promise.resolve(part.image),
+          part.mask ? persist(part.mask) : Promise.resolve(part.mask),
+        ]);
+        return { ...part, url, image, mask };
+      }));
+      nm = { ...nm, parts };
+    }
     // 2) portsPlan.images
     if (nm.portsPlan?.images?.length) {
       const pp = nm.portsPlan;
@@ -88,6 +100,13 @@ export async function slimSnapshot(
     if (nm.regeneration?.kind === "ai-image" && nm.regeneration.images.length) {
       const images = await Promise.all(nm.regeneration.images.map((src) => persist(src)));
       nm = { ...nm, regeneration: { ...nm.regeneration, images } };
+    }
+    if (nm.regeneration?.kind === "ai-image" && nm.regeneration.imageMask) {
+      const [image, mask] = await Promise.all([
+        persist(nm.regeneration.imageMask.image),
+        persist(nm.regeneration.imageMask.mask),
+      ]);
+      nm = { ...nm, regeneration: { ...nm.regeneration, imageMask: { image, mask } } };
     }
     out.push(nm);
   }
