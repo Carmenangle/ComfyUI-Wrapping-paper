@@ -63,17 +63,20 @@ if (-not $NoPush) {
   if ($LASTEXITCODE -ne 0) { throw "git push 失败(检查远端/网络)" }
 }
 
-# 5) 打 zip：git archive 只打 HEAD 里被追踪的文件，天然排除所有 gitignore 内容(隐私零泄漏)
-Write-Host "== 打包 zip =="
-$zipName = "ComfyUI-Wrapping-paper-$Version.zip"
+# 5) 用共享构建模块生成 Windows 专属离线源码包（复用已验证的 Windows vendor）。
+Write-Host "== 打包 Windows 离线源码包 =="
+$zipName = "ComfyUI-Wrapping-paper-$Version-source-windows-x64.zip"
 $zipPath = Join-Path $projectRoot $zipName
-& git archive --format=zip -o $zipPath HEAD
-if ($LASTEXITCODE -ne 0) { throw "git archive 失败" }
+$sourceWork = Join-Path $projectRoot ".source-work\windows-x64"
+& $preflightPy (Join-Path $PSScriptRoot "source_release.py") build `
+  --target windows-x64 --version $Version --output-dir $projectRoot `
+  --work-dir $sourceWork --reuse-vendor
+if ($LASTEXITCODE -ne 0) { throw "Windows 离线源码包构建失败" }
 
 $sizeMB = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 1)
 Write-Host ""
 Write-Host "完成：$zipName ($sizeMB MB)"
-Write-Host "该 zip 含代码 + vendor 离线依赖(pip/npm)，不含 backend/data 等隐私文件。"
+Write-Host "该 zip 只含 Windows x64 对应的源码与离线依赖，不含 backend/data 等隐私文件。"
 
 # 6) 可选：建 tag + 发 GitHub Release 并上传 zip
 if ($Publish) {
@@ -92,6 +95,12 @@ if ($Publish) {
     Write-Host "Release $Version 已存在，覆盖上传 zip..."
     & gh release upload $Version $zipPath --clobber
     if ($LASTEXITCODE -ne 0) { throw "上传 zip 到已有 Release 失败" }
+    $legacyName = "ComfyUI-Wrapping-paper-$Version.zip"
+    $assetNames = @(& gh release view $Version --json assets --jq '.assets[].name')
+    if ($assetNames -contains $legacyName) {
+      & gh release delete-asset $Version $legacyName --yes
+      if ($LASTEXITCODE -ne 0) { throw "删除旧版通用源码包失败" }
+    }
   } else {
     if ($notesPath) {
       & gh release create $Version $zipPath --title $Version --notes-file $notesPath

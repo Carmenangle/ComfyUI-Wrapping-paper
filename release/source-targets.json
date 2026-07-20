@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "build_python_version": "3.13.11",
+  "python_versions": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+  "targets": [
+    {
+      "id": "windows-x64",
+      "os": "windows",
+      "arch": "x64",
+      "runner": "windows-2025",
+      "archive": "zip"
+    },
+    {
+      "id": "linux-x64",
+      "os": "linux",
+      "arch": "x64",
+      "runner": "ubuntu-24.04",
+      "archive": "tar.gz"
+    },
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "arch": "arm64",
+      "runner": "macos-15",
+      "archive": "tar.gz"
+    },
+    {
+      "id": "macos-x64",
+      "os": "macos",
+      "arch": "x64",
+      "runner": "macos-15-intel",
+      "archive": "tar.gz"
+    }
+  ]
+}

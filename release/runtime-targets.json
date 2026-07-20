@@ -50,6 +50,24 @@
       "edition": "standard",
       "runner": "macos-15-intel",
       "accelerator": "none"
+    },
+    {
+      "id": "linux-x64-standard",
+      "os": "linux",
+      "arch": "x64",
+      "edition": "standard",
+      "runner": "ubuntu-24.04",
+      "accelerator": "none"
+    },
+    {
+      "id": "linux-x64-full-rag",
+      "os": "linux",
+      "arch": "x64",
+      "edition": "full-rag",
+      "runner": "ubuntu-24.04",
+      "accelerator": "cuda",
+      "torch_version": "2.13.0+cu130",
+      "torch_index_url": "https://download.pytorch.org/whl/cu130"
     }
   ]
 }

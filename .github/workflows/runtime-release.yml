@@ -13,11 +13,15 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONUTF8: "1"
+
 jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      source-matrix: ${{ steps.source-matrix.outputs.matrix }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +31,9 @@ jobs:
       - id: matrix
         shell: bash
         run: echo "matrix=$(python scripts/runtime_release.py matrix)" >> "$GITHUB_OUTPUT"
+      - id: source-matrix
+        shell: bash
+        run: echo "matrix=$(python scripts/source_release.py matrix)" >> "$GITHUB_OUTPUT"
       - id: version
         shell: bash
         env:
@@ -119,9 +126,41 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  source-build:
+    needs: [plan, quality]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.source-matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 构建本平台离线源码包
+        run: >-
+          python scripts/source_release.py build
+          --target "${{ matrix.source-target }}"
+          --version "${{ needs.plan.outputs.version }}"
+          --output-dir ".release-assets"
+          --work-dir ".source-work/${{ matrix.source-target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-${{ matrix.source-target }}
+          path: .release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [plan, build]
+    needs: [plan, build, source-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -135,3 +174,4 @@ jobs:
         with:
           files: release-assets/*
           fail_on_unmatched_files: true
+          overwrite_files: true

@@ -8,7 +8,7 @@
 
 | 项 | 要求 | 说明 |
 |---|---|---|
-| **Python** | **3.10 – 3.12（强烈推荐）** | 项目自带的离线依赖（`vendor/pip`）只完整覆盖 **3.10–3.14**。用这个区间的版本 clone 后可**纯离线装齐**，无需联网。 |
+| **Python** | **3.10 – 3.14** | 各平台 `source-*` 发布包内置对应系统与架构的 wheels；直接 clone 的仓库只保留 Windows vendor。 |
 | Node.js | ≥ 18 | 前端 `npm install` 需要。 |
 | ComfyUI | 本机已装并能启动（默认 8188） | 本工具是其前端封装，需指向已有 ComfyUI 目录。 |
 
@@ -26,16 +26,25 @@
 | Windows x64 | `windows-x64-standard` | `windows-x64-full-rag`（NVIDIA CUDA） |
 | macOS Apple Silicon | `macos-arm64-standard` | `macos-arm64-full-rag`（MPS） |
 | macOS Intel | `macos-x64-standard` | 不提供，CPU Reranker 不进入交互精排 |
+| Linux x64 | `linux-x64-standard` | `linux-x64-full-rag`（NVIDIA CUDA） |
 
-标准版支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版额外内置 Qwen3-Reranker-0.6B、SentenceTransformers 和对应平台 Torch。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS），应用会打开 `http://127.0.0.1:8010`。
+标准版支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版额外内置 Qwen3-Reranker-0.6B、SentenceTransformers 和对应平台 Torch。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS/Linux），应用会打开 `http://127.0.0.1:8010`。
 
 本工具 Runtime 与 ComfyUI 的 Python 完全分离。设置中的“ComfyUI Python”可留空自动识别整合包或 `.venv/venv`；自定义安装位置需填写其解释器路径。工具不会使用自己的 Python 启动 ComfyUI。提交工作流前会释放本地 Reranker 显存，避免与 ComfyUI 采样同时占用 GPU/MPS。
 
-完整 RAG 包超过 GitHub 单文件限制时会带 `.parts.json` 和多个 `.partNN`。下载同一 Release 的合并工具后，Windows 执行 `powershell -File .\join-runtime.ps1 -Manifest <清单>`，macOS 执行 `sh ./join-runtime.sh <清单>`；两者都会流式合并并校验 SHA256。
+完整 RAG 包超过 GitHub 单文件限制时会带 `.parts.json` 和多个 `.partNN`。下载同一 Release 的合并工具后，Windows 执行 `powershell -File .\join-runtime.ps1 -Manifest <清单>`，macOS/Linux 执行 `sh ./join-runtime.sh <清单>`；两者都会流式合并并校验 SHA256。
 
 ### 源码开发
 
 双击根目录 `start-dev.bat` 一键启动（后台拉起前后端 + ComfyUI，并打开浏览器）；`stop-dev.bat` 停止。
+
+离线环境应下载与本机匹配的源码发布包：`source-windows-x64.zip`、`source-linux-x64.tar.gz`、`source-macos-arm64.tar.gz` 或 `source-macos-x64.tar.gz`。每个包只包含本平台 Python 3.10–3.14 wheels 与 npm 缓存。Windows 使用 `start-dev.bat`；macOS/Linux 使用：
+
+```sh
+sh ./start-dev.sh
+```
+
+维护者在 Windows 使用 `scripts/release.ps1`；macOS/Linux 使用 `sh scripts/release.sh <版本> "<说明>" --publish`。GitHub Runtime 工作流会在对应原生 Runner 上重新生成并离线复验各平台源码包，不把多平台 wheels 混入同一个归档。
 
 手动启动：
 

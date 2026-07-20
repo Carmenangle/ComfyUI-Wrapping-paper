@@ -37,6 +37,13 @@ def test_runtime_reassembly_helpers_do_not_require_python():
     assert "python.exe" not in powershell.lower()
 
 
+def test_cross_platform_source_release_entrypoints_exist():
+    assert (ROOT / "scripts" / "source_release.py").is_file()
+    assert (ROOT / "scripts" / "release.sh").is_file()
+    assert (ROOT / "start-dev.sh").is_file()
+    assert (ROOT / "release" / "source-targets.json").is_file()
+
+
 def test_runtime_release_validates_windows_vendor_on_windows_runner():
     workflow = (ROOT / ".github" / "workflows" / "runtime-release.yml").read_text(
         encoding="utf-8"
@@ -44,5 +51,8 @@ def test_runtime_release_validates_windows_vendor_on_windows_runner():
 
     assert "vendor-closure:" in workflow
     assert "runs-on: windows-2025" in workflow
+    assert 'PYTHONUTF8: "1"' in workflow
     assert "needs: [plan, quality, vendor-closure]" in workflow
     assert "python scripts/release_preflight.py" in workflow
+    assert "source-build:" in workflow
+    assert "python scripts/source_release.py build" in workflow

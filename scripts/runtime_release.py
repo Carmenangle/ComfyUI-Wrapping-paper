@@ -269,7 +269,12 @@ def install_frontend_dependencies(root: Path, frontend_work: Path, npm: str) -> 
 
 
 def _host_matches(target: RuntimeTarget) -> bool:
-    host_os = "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "other"
+    host_os = (
+        "windows" if os.name == "nt"
+        else "macos" if sys.platform == "darwin"
+        else "linux" if sys.platform.startswith("linux")
+        else "other"
+    )
     machine = platform.machine().lower()
     host_arch = "arm64" if machine in {"arm64", "aarch64"} else "x64" if machine in {"amd64", "x86_64"} else machine
     return target.os == host_os and target.arch == host_arch

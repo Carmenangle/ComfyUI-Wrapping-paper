@@ -29,6 +29,9 @@ WORKFLOW_BUILDER_PLAN.md
 Thumbs.db
 *.tmp
 ComfyUI-Wrapping-paper-v*.zip
+ComfyUI-Wrapping-paper-v*.tar.gz
+.source-work/
+.release-assets/
 _backfill.py
 _check.py
 _chk.py

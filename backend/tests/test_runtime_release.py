@@ -21,9 +21,12 @@ def test_runtime_target_matrix_covers_supported_editions_and_platforms():
         "macos-arm64-standard",
         "macos-arm64-full-rag",
         "macos-x64-standard",
+        "linux-x64-standard",
+        "linux-x64-full-rag",
     }
     assert targets["windows-x64-full-rag"].accelerator == "cuda"
     assert targets["macos-arm64-full-rag"].accelerator == "mps"
+    assert targets["linux-x64-full-rag"].accelerator == "cuda"
     assert all(target.python_version == "3.13.11" for target in targets.values())
 
 

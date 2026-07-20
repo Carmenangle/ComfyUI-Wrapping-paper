@@ -188,20 +188,23 @@ def validate(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--structure-only", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     errors = validate(root)
-    dependency_error = offline_dependency_error(root)
-    if dependency_error:
-        errors.append(dependency_error)
-    npm_error = offline_npm_dependency_error(root)
-    if npm_error:
-        errors.append(npm_error)
+    if not args.structure_only:
+        dependency_error = offline_dependency_error(root)
+        if dependency_error:
+            errors.append(dependency_error)
+        npm_error = offline_npm_dependency_error(root)
+        if npm_error:
+            errors.append(npm_error)
     if errors:
         for error in errors:
             print("ERROR: " + error)
         return 1
-    print("发布前置校验通过：pip/npm 离线依赖树、CSS 主题素材和主题清单产物均完整。")
+    scope = "结构与主题素材" if args.structure_only else "pip/npm 离线依赖树、CSS 主题素材和主题清单产物"
+    print(f"发布前置校验通过：{scope}均完整。")
     print("可选 sentence-transformers/Reranker 依赖与模型权重不在基础发布包内。")
     return 0
 
