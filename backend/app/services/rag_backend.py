@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -25,13 +24,6 @@ class EmbedConfig:
     model_dir: str = ""
     reranker_dir: str = ""
     mode: Literal["remote", "local"] = "remote"
-
-    def __post_init__(self) -> None:
-        if not self.reranker_dir.strip():
-            bundled = os.environ.get("LAF_BUNDLED_RERANKER_DIR", "").strip()
-            if bundled:
-                object.__setattr__(self, "reranker_dir", bundled)
-
 
 def _norm_url(base_url: str) -> str:
     url = (base_url or "").rstrip("/")

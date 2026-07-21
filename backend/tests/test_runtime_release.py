@@ -52,18 +52,16 @@ def test_standard_and_full_rag_pyinstaller_plans_are_distinct(tmp_path):
     assert "torch" not in full_excludes
 
 
-def test_runtime_environment_uses_writable_data_and_bundled_reranker(tmp_path):
+def test_runtime_environment_uses_writable_data_without_bundled_models(tmp_path):
     env = runtime_release.runtime_environment(tmp_path, "full-rag")
 
     assert env["LAF_DATA_DIR"] == str(tmp_path / "data")
     assert env["LAF_FRONTEND_DIST"] == str(tmp_path / "frontend")
     assert env["LAF_COMFY_EXT_DIR"] == str(tmp_path / "comfyui-ext")
-    assert Path(env["LAF_BUNDLED_RERANKER_DIR"]) == (
-        tmp_path / "models" / "reranker" / "Qwen3-Reranker-0.6B"
-    )
+    assert "LAF_BUNDLED_RERANKER_DIR" not in env
 
 
-def test_full_rag_tree_requires_complete_bundled_model(tmp_path):
+def test_full_rag_tree_does_not_require_bundled_model_weights(tmp_path):
     target = runtime_release.load_targets(
         ROOT / "release" / "runtime-targets.json"
     )["macos-arm64-full-rag"]
@@ -71,15 +69,20 @@ def test_full_rag_tree_requires_complete_bundled_model(tmp_path):
     (tree / "frontend").mkdir(parents=True)
     (tree / "frontend" / "index.html").write_text("ok", encoding="utf-8")
     (tree / target.executable_name).write_text("bin", encoding="utf-8")
-    model = tree / "models" / "reranker" / "Qwen3-Reranker-0.6B"
-    model.mkdir(parents=True)
-    (model / "config.json").write_text("{}", encoding="utf-8")
-
-    errors = runtime_release.validate_runtime_tree(tree, target)
-    assert any("Reranker" in error for error in errors)
-
-    (model / "model.safetensors").write_bytes(b"weights")
     assert runtime_release.validate_runtime_tree(tree, target) == []
+
+
+def test_runtime_targets_do_not_pin_or_download_model_weights():
+    manifest = json.loads(
+        (ROOT / "release" / "runtime-targets.json").read_text(encoding="utf-8")
+    )
+    workflow = (ROOT / ".github" / "workflows" / "runtime-release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "reranker" not in manifest
+    assert "huggingface" not in workflow.lower()
+    assert "缓存完整 RAG 权重" not in workflow
 
 
 def test_split_asset_writes_reassembly_manifest(tmp_path):

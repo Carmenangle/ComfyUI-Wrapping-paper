@@ -29,9 +29,6 @@ class RuntimeTarget(NamedTuple):
     accelerator: str
     python_version: str
     pyinstaller_version: str
-    reranker_repo: str
-    reranker_revision: str
-    reranker_directory: str
     torch_version: str = ""
     torch_index_url: str = ""
 
@@ -48,7 +45,6 @@ def load_targets(path: Path) -> dict[str, RuntimeTarget]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if raw.get("schema_version") != 1:
         raise ValueError("不支持的 Runtime 目标清单版本")
-    reranker = raw["reranker"]
     targets: dict[str, RuntimeTarget] = {}
     for item in raw["targets"]:
         target = RuntimeTarget(
@@ -57,9 +53,6 @@ def load_targets(path: Path) -> dict[str, RuntimeTarget]:
             accelerator=item["accelerator"],
             python_version=raw["python_version"],
             pyinstaller_version=raw["pyinstaller_version"],
-            reranker_repo=reranker["repo_id"],
-            reranker_revision=reranker["revision"],
-            reranker_directory=reranker["directory"],
             torch_version=item.get("torch_version", ""),
             torch_index_url=item.get("torch_index_url", ""),
         )
@@ -80,10 +73,6 @@ def runtime_environment(root: Path, edition: str) -> dict[str, str]:
         "LAF_FRONTEND_DIST": str(root / "frontend"),
         "LAF_COMFY_EXT_DIR": str(root / "comfyui-ext"),
     }
-    if edition == "full-rag":
-        env["LAF_BUNDLED_RERANKER_DIR"] = str(
-            root / "models" / "reranker" / "Qwen3-Reranker-0.6B"
-        )
     return env
 
 
@@ -125,36 +114,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _model_complete(model_dir: Path) -> bool:
-    single = model_dir / "model.safetensors"
-    if single.is_file() and single.stat().st_size > 0:
-        return True
-    index_path = model_dir / "model.safetensors.index.json"
-    if not index_path.is_file():
-        return False
-    try:
-        shards = set(
-            json.loads(index_path.read_text(encoding="utf-8"))
-            .get("weight_map", {}).values()
-        )
-    except (OSError, ValueError, TypeError):
-        return False
-    return bool(shards) and all(
-        (model_dir / shard).is_file() and (model_dir / shard).stat().st_size > 0
-        for shard in shards
-    )
-
-
 def validate_runtime_tree(tree: Path, target: RuntimeTarget) -> list[str]:
     errors: list[str] = []
     if not (tree / target.executable_name).is_file():
         errors.append(f"缺少运行入口：{target.executable_name}")
     if not (tree / "frontend" / "index.html").is_file():
         errors.append("缺少已构建前端：frontend/index.html")
-    if target.full_rag:
-        model_dir = tree / "models" / "reranker" / target.reranker_directory
-        if not _model_complete(model_dir):
-            errors.append("完整 RAG 版缺少完整的内置 Reranker 权重")
     return errors
 
 
@@ -297,24 +262,9 @@ def install_build_dependencies(root: Path, target: RuntimeTarget) -> None:
     _run([sys.executable, "-m", "pip", "install", f"pyinstaller=={target.pyinstaller_version}"], root)
 
 
-def _prepare_model(target: RuntimeTarget, destination: Path, model_source: str) -> None:
-    if model_source:
-        source = Path(model_source).expanduser().resolve()
-        if not _model_complete(source):
-            raise RuntimeError(f"Reranker 权重不完整：{source}")
-        shutil.copytree(source, destination, dirs_exist_ok=True)
-        return
-    from huggingface_hub import snapshot_download
-    snapshot_download(
-        repo_id=target.reranker_repo,
-        revision=target.reranker_revision,
-        local_dir=destination,
-    )
-
-
 def build_runtime(
     root: Path, target: RuntimeTarget, version: str, output_dir: Path,
-    work_dir: Path, *, install_deps: bool, model_source: str,
+    work_dir: Path, *, install_deps: bool,
 ) -> list[Path]:
     if not _host_matches(target):
         raise RuntimeError(f"当前主机不能构建目标 {target.id}")
@@ -338,12 +288,6 @@ def build_runtime(
     shutil.copytree(frontend_work / "dist", tree / "frontend", dirs_exist_ok=True)
     shutil.copytree(root / "comfyui-ext", tree / "comfyui-ext", dirs_exist_ok=True)
     shutil.copy2(root / "README.md", tree / "README.md")
-    if target.full_rag:
-        _prepare_model(
-            target,
-            tree / "models" / "reranker" / target.reranker_directory,
-            model_source,
-        )
     errors = validate_runtime_tree(tree, target)
     if errors:
         raise RuntimeError("；".join(errors))
@@ -371,7 +315,6 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--output-dir", type=Path, required=True)
     build.add_argument("--work-dir", type=Path, required=True)
     build.add_argument("--install-deps", action="store_true")
-    build.add_argument("--model-source", default="")
     verify = sub.add_parser("verify")
     verify.add_argument("--target", required=True)
     verify.add_argument("--tree", type=Path, required=True)
@@ -398,7 +341,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     assets = build_runtime(
         root, target, args.version, args.output_dir, args.work_dir,
-        install_deps=args.install_deps, model_source=args.model_source,
+        install_deps=args.install_deps,
     )
     for asset in assets:
         print(asset)

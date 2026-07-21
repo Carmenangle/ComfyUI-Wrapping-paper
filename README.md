@@ -28,7 +28,7 @@
 | macOS Intel | `macos-x64-standard` | 不提供，CPU Reranker 不进入交互精排 |
 | Linux x64 | `linux-x64-standard` | `linux-x64-full-rag`（NVIDIA CUDA） |
 
-标准版支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版额外内置 Qwen3-Reranker-0.6B、SentenceTransformers 和对应平台 Torch。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS/Linux），应用会打开 `http://127.0.0.1:8010`。
+标准版已封装工具运行所需的 Python、全部基础后端依赖和已构建前端，支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版在此基础上额外封装对应平台 Torch、Transformers、SentenceTransformers 等本地 Embedding/Reranker 运行依赖，但不内置任何模型权重。图片、对话、视频 API 和本地模型目录均由用户在设置中配置。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS/Linux），无需安装 Python、wheel、pip、npm 或 Node.js，应用会打开 `http://127.0.0.1:8010`。
 
 本工具 Runtime 与 ComfyUI 的 Python 完全分离。设置中的“ComfyUI Python”可留空自动识别整合包或 `.venv/venv`；自定义安装位置需填写其解释器路径。工具不会使用自己的 Python 启动 ComfyUI。提交工作流前会释放本地 Reranker 显存，避免与 ComfyUI 采样同时占用 GPU/MPS。
 

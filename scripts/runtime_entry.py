@@ -23,11 +23,9 @@ def configure_environment(root: Path) -> None:
         "LAF_DATA_DIR": str(root / "data"),
         "LAF_FRONTEND_DIST": str(root / "frontend"),
         "LAF_COMFY_EXT_DIR": str(root / "comfyui-ext"),
+        "LAF_RUNTIME_EDITION": edition,
     })
-    bundled = root / "models" / "reranker" / "Qwen3-Reranker-0.6B"
-    if edition == "full-rag" or bundled.is_dir():
-        os.environ["LAF_RUNTIME_EDITION"] = "full-rag"
-        os.environ["LAF_BUNDLED_RERANKER_DIR"] = str(bundled)
+    os.environ.pop("LAF_BUNDLED_RERANKER_DIR", None)
     (root / "data").mkdir(parents=True, exist_ok=True)
 
 
