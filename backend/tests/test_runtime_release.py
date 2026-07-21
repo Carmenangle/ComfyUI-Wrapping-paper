@@ -115,3 +115,32 @@ def test_runtime_ci_does_not_reuse_foreign_offline_npm_cache(monkeypatch, tmp_pa
     )
 
     assert commands == [["npm", "ci"]]
+
+
+def test_runtime_self_check_resolves_relative_tree_before_changing_cwd(
+    monkeypatch, tmp_path,
+):
+    target = runtime_release.load_targets(
+        ROOT / "release" / "runtime-targets.json"
+    )["linux-x64-standard"]
+    tree = tmp_path / "runtime"
+    tree.mkdir()
+    (tree / target.executable_name).touch()
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = '{"status":"ok"}\n'
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["cwd"] = kwargs["cwd"]
+        return Result()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(runtime_release.subprocess, "run", fake_run)
+    runtime_release.run_runtime_self_check(Path("runtime"), target)
+
+    assert Path(seen["command"][0]).is_absolute()
+    assert Path(seen["cwd"]).is_absolute()

@@ -159,6 +159,7 @@ def validate_runtime_tree(tree: Path, target: RuntimeTarget) -> list[str]:
 
 
 def run_runtime_self_check(tree: Path, target: RuntimeTarget) -> None:
+    tree = tree.resolve()
     with tempfile.TemporaryDirectory(prefix="runtime-self-check-", dir=tree.parent) as temp_data:
         env = os.environ.copy()
         env.update(runtime_environment(tree, target.edition))
