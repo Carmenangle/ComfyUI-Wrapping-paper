@@ -38,7 +38,7 @@ def load_targets(path: Path) -> dict[str, SourceTarget]:
             id=item["id"], os=item["os"], arch=item["arch"],
             runner=item["runner"], archive=item["archive"],
             build_python_version=raw["build_python_version"],
-            python_versions=versions,
+            python_versions=tuple(item.get("python_versions", versions)),
         )
         if target.id in targets:
             raise ValueError(f"Duplicate source target: {target.id}")
@@ -99,6 +99,15 @@ def _npm() -> str:
     return npm
 
 
+def install_native_npm_dependencies(
+    frontend: Path, npm: str, cache: Path | None = None,
+) -> None:
+    command = [npm, "ci"]
+    if cache is not None:
+        command.extend(("--cache", str(cache)))
+    _run(command, frontend)
+
+
 def _snapshot(root: Path, tree: Path, work_dir: Path) -> None:
     snapshot = work_dir / "source.tar"
     _run(["git", "archive", "--format=tar", "-o", str(snapshot), "HEAD"], root)
@@ -125,7 +134,7 @@ def _refresh_npm_vendor(tree: Path) -> None:
     cache = tree / "vendor" / "npm"
     shutil.rmtree(cache, ignore_errors=True)
     cache.mkdir(parents=True)
-    _run([npm, "ci", "--cache", str(cache)], frontend)
+    install_native_npm_dependencies(frontend, npm, cache)
     shutil.rmtree(frontend / "node_modules", ignore_errors=True)
     for junk in ("_logs", "_update-notifier-last-checked"):
         path = cache / junk

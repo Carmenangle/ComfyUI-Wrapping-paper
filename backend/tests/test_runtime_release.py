@@ -104,3 +104,14 @@ def test_npm_executable_resolves_windows_command_wrapper(monkeypatch):
         lambda name: "C:/node/npm.cmd" if name == "npm.cmd" else None,
     )
     assert runtime_release.npm_executable() == "C:/node/npm.cmd"
+
+
+def test_runtime_ci_does_not_reuse_foreign_offline_npm_cache(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(runtime_release, "_run", lambda command, cwd: commands.append(command))
+
+    runtime_release.install_frontend_dependencies(
+        tmp_path, tmp_path / "frontend", "npm", prefer_offline=False
+    )
+
+    assert commands == [["npm", "ci"]]

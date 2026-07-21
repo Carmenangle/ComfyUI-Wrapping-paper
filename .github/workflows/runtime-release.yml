@@ -116,13 +116,13 @@ jobs:
           python scripts/runtime_release.py build
           --target "${{ matrix.target }}"
           --version "${{ needs.plan.outputs.version }}"
-          --output-dir ".release-assets"
+          --output-dir "release-assets"
           --work-dir ".runtime-work/${{ matrix.target }}"
           --install-deps
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: .release-assets/*
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 7
 
@@ -149,12 +149,12 @@ jobs:
           python scripts/source_release.py build
           --target "${{ matrix.source-target }}"
           --version "${{ needs.plan.outputs.version }}"
-          --output-dir ".release-assets"
+          --output-dir "release-assets"
           --work-dir ".source-work/${{ matrix.source-target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: source-${{ matrix.source-target }}
-          path: .release-assets/*
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 7
 

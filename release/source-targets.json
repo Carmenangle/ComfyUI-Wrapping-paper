@@ -29,7 +29,8 @@
       "os": "macos",
       "arch": "x64",
       "runner": "macos-15-intel",
-      "archive": "tar.gz"
+      "archive": "tar.gz",
+      "python_versions": ["3.10", "3.11", "3.12", "3.13"]
     }
   ]
 }

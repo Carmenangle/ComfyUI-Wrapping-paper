@@ -20,7 +20,19 @@ def test_source_target_matrix_covers_native_platforms():
         "macos-arm64",
         "macos-x64",
     }
-    assert all(target.python_versions == ("3.10", "3.11", "3.12", "3.13", "3.14") for target in targets.values())
+    assert targets["windows-x64"].python_versions == ("3.10", "3.11", "3.12", "3.13", "3.14")
+    assert targets["macos-x64"].python_versions == ("3.10", "3.11", "3.12", "3.13")
+
+
+def test_runtime_ci_frontend_install_uses_native_online_optional_dependencies(
+    monkeypatch, tmp_path,
+):
+    commands = []
+    monkeypatch.setattr(source_release, "_run", lambda command, cwd: commands.append(command))
+
+    source_release.install_native_npm_dependencies(tmp_path, "npm")
+
+    assert commands == [["npm", "ci"]]
 
 
 def test_source_pip_download_is_binary_only_and_version_scoped(tmp_path):

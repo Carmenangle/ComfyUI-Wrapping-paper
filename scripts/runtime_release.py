@@ -255,7 +255,12 @@ def npm_executable() -> str:
     return npm
 
 
-def install_frontend_dependencies(root: Path, frontend_work: Path, npm: str) -> None:
+def install_frontend_dependencies(
+    root: Path, frontend_work: Path, npm: str, *, prefer_offline: bool = True,
+) -> None:
+    if not prefer_offline:
+        _run([npm, "ci"], frontend_work)
+        return
     cache = root / "vendor" / "npm"
     if cache.is_dir():
         offline = subprocess.run(
@@ -323,7 +328,9 @@ def build_runtime(
         ignore=shutil.ignore_patterns("node_modules", "dist"),
     )
     npm = npm_executable()
-    install_frontend_dependencies(root, frontend_work, npm)
+    install_frontend_dependencies(
+        root, frontend_work, npm, prefer_offline=not install_deps,
+    )
     _run([npm, "run", "build"], frontend_work)
     _run(pyinstaller_command(target, root, work_dir), root)
     tree = work_dir / "dist" / APP_NAME

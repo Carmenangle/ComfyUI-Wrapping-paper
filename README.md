@@ -38,7 +38,7 @@
 
 双击根目录 `start-dev.bat` 一键启动（后台拉起前后端 + ComfyUI，并打开浏览器）；`stop-dev.bat` 停止。
 
-离线环境应下载与本机匹配的源码发布包：`source-windows-x64.zip`、`source-linux-x64.tar.gz`、`source-macos-arm64.tar.gz` 或 `source-macos-x64.tar.gz`。每个包只包含本平台 Python 3.10–3.14 wheels 与 npm 缓存。Windows 使用 `start-dev.bat`；macOS/Linux 使用：
+离线环境应下载与本机匹配的源码发布包：`source-windows-x64.zip`、`source-linux-x64.tar.gz`、`source-macos-arm64.tar.gz` 或 `source-macos-x64.tar.gz`。Windows、Linux 和 macOS ARM64 包含本平台 Python 3.10–3.14 wheels；macOS Intel 因上游 `chroma-hnswlib` 没有 Python 3.14 wheel，覆盖 3.10–3.13。各包均带本平台 npm 缓存。Windows 使用 `start-dev.bat`；macOS/Linux 使用：
 
 ```sh
 sh ./start-dev.sh

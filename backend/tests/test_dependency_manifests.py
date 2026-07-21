@@ -56,3 +56,5 @@ def test_runtime_release_validates_windows_vendor_on_windows_runner():
     assert "python scripts/release_preflight.py" in workflow
     assert "source-build:" in workflow
     assert "python scripts/source_release.py build" in workflow
+    assert '.release-assets/*' not in workflow
+    assert '--output-dir "release-assets"' in workflow
