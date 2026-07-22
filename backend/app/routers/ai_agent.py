@@ -158,6 +158,49 @@ def image_agent_running(thread_id: str = "home") -> dict[str, object]:
     return {"running": agent_runner.is_running(thread_id)}
 
 
+@router.get("/image-agent/running-threads")
+def image_agent_running_threads() -> dict[str, object]:
+    """当前有后台生成任务在跑的所有 thread（仓库 id），供后台活动面板列出。"""
+    from app.services import thread_admission
+    return {"threads": thread_admission.active_threads()}
+
+
+class ChatQueueEnqueueRequest(MultiAgentRequest):
+    pass
+
+
+@router.post("/chat-queue/enqueue")
+def chat_queue_enqueue(req: ChatQueueEnqueueRequest) -> dict[str, object]:
+    """把一条忙时排队消息落后端队列；worker 在前一条结束后串行认领执行（刷新/重开仍继续）。"""
+    from app.services import chat_agent_queue
+    payload = req.model_dump()
+    if req.image_mask:
+        payload["image_mask"] = req.image_mask.model_dump()
+    task = chat_agent_queue.enqueue(payload)
+    return {"task": task}
+
+
+@router.get("/chat-queue")
+def chat_queue_list(thread_id: str = "") -> dict[str, object]:
+    """列出某仓库（或全部）的排队消息，供前端持久化队列条与后台面板显示。"""
+    from app.services import chat_agent_queue
+    return {"tasks": chat_agent_queue.list_tasks(thread_id)}
+
+
+class ChatQueueCancelRequest(BaseModel):
+    task_id: str
+
+
+@router.post("/chat-queue/cancel")
+def chat_queue_cancel(req: ChatQueueCancelRequest) -> dict[str, object]:
+    """取消一条尚未发出的排队消息。"""
+    from app.services import chat_agent_queue
+    task = chat_agent_queue.cancel(req.task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="排队消息不存在")
+    return {"task": task}
+
+
 class CancelRequest(BaseModel):
     thread_id: str = "home"
 

@@ -47,5 +47,48 @@ def init_db() -> None:
                 unique(provider_id, model_name),
                 foreign key(provider_id) references ai_providers(id) on delete cascade
             );
+
+            create table if not exists workflow_build_tasks (
+                id text primary key,
+                session_id text not null,
+                mode text not null,
+                need text not null,
+                payload text not null,
+                status text not null,
+                result text not null default '',
+                error text not null default '',
+                created_at integer not null,
+                updated_at integer not null,
+                worker_id text not null default '',
+                lease_expires_at integer not null default 0
+            );
+            create index if not exists idx_workflow_build_tasks_queue
+                on workflow_build_tasks(status, created_at);
+
+            create table if not exists chat_agent_queue (
+                id text primary key,
+                thread_id text not null,
+                need text not null,
+                payload text not null,
+                status text not null,
+                error text not null default '',
+                created_at integer not null,
+                updated_at integer not null,
+                worker_id text not null default '',
+                lease_expires_at integer not null default 0
+            );
+            create index if not exists idx_chat_agent_queue_queue
+                on chat_agent_queue(status, created_at);
             """
         )
+        columns = {
+            row["name"] for row in connection.execute("pragma table_info(workflow_build_tasks)")
+        }
+        if "worker_id" not in columns:
+            connection.execute(
+                "alter table workflow_build_tasks add column worker_id text not null default ''"
+            )
+        if "lease_expires_at" not in columns:
+            connection.execute(
+                "alter table workflow_build_tasks add column lease_expires_at integer not null default 0"
+            )

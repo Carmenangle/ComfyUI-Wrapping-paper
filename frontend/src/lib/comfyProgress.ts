@@ -37,7 +37,11 @@ export interface Progress {
 export function subscribeProgress(
   comfyUrl: string,
   promptId: string,
-  cbs: { onProgress?: (pct: number, p: Progress) => void; onDone?: () => void },
+  cbs: {
+    onProgress?: (pct: number, p: Progress) => void;
+    onNode?: (nodeId: string) => void;   // 当前正在执行的节点 id（切换时触发）
+    onDone?: () => void;
+  },
 ): () => void {
   let ws: WebSocket | null = null;
   let closed = false;
@@ -56,9 +60,12 @@ export function subscribeProgress(
       const max = Number(d.max ?? 0);
       const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
       cbs.onProgress?.(pct, { value, max, node: d.node as string | undefined });
-    } else if (msg.type === "executing" && d.node == null && pid === promptId) {
-      // node=null 表示该 prompt 执行结束
-      cbs.onDone?.();
+    } else if (msg.type === "executing" && pid === promptId) {
+      if (d.node == null) {
+        cbs.onDone?.();   // node=null 表示该 prompt 执行结束
+      } else {
+        cbs.onNode?.(String(d.node));  // 节点切换：当前正在执行此节点
+      }
     }
   };
 

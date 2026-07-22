@@ -11,10 +11,23 @@ import {
 import { fullUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { useBuildSession } from "../lib/useBuildSession";
 import { confirmedPlanExecution } from "../lib/workflowBuildExecution";
+import {
+  cancelWorkflowBuild, enqueueWorkflowBuild, subscribeWorkflowBuildActivities,
+  type WorkflowBuildActivity,
+} from "../lib/workflowBuildActivity";
 
 // 一轮对话消息（左栏）。pendingNeed 非空=这是顾问模式的方案消息，带「同意执行/编辑/取消」按钮。
 // pendingNeed=点同意时真正搭建用的需求(原需求+方案)；planText=纯方案文本，供「编辑」填回输入框改。
 interface Msg { id: string; role: "user" | "assistant"; text: string; pendingNeed?: string; planText?: string; planOriginalNeed?: string; editing?: boolean; missingNodes?: string[]; alternatives?: Record<string, string[]>; retryNeed?: string; }
+
+const handledActivityKey = (sessionId: string) => `laf_workflow_handled_${sessionId}`;
+const readHandledActivityIds = (sessionId: string) => {
+  try { return JSON.parse(localStorage.getItem(handledActivityKey(sessionId)) || "[]") as string[]; } catch { return []; }
+};
+const rememberHandledActivity = (sessionId: string, id: string) => {
+  const ids = [...new Set([...readHandledActivityIds(sessionId), id])].slice(-100);
+  localStorage.setItem(handledActivityKey(sessionId), JSON.stringify(ids));
+};
 
 // AI 搭工作流（双栏）：左栏多轮对话与 AI 探讨，右栏完整功能 ComfyUI 画布。
 // AI 每轮读回右侧画布作上下文 → 输出完整 graph → 写入右侧；用户可在画布里手动接着改。
@@ -34,6 +47,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   // 搭建会话（进度保存 + 多开）
   const LAST_KEY = "laf_build_last_session";
   const [sessionId, setSessionId] = useState<string>("");
+  const sessionIdRef = useRef("");
+  const sessionCreationRef = useRef<Promise<string> | null>(null);
   const [sessionName, setSessionName] = useState<string>("未命名工作流");
   const [sessions, setSessions] = useState<BuildSessionMeta[]>([]);
   const [showSessions, setShowSessions] = useState(false);
@@ -43,6 +58,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const scrollRef = useRef<HTMLDivElement>(null);
   const buildSession = useBuildSession();
   const abortRef = useRef<AbortController | null>(null);   // 正在跑的搭建请求，供“停止”按钮中止
+  const [activities, setActivities] = useState<WorkflowBuildActivity[]>([]);
+  const handledActivities = useRef(new Set<string>(readHandledActivityIds("draft")));
 
   // 版本历史：每次成功写画布/载入底座都压一版，可撤销/重做（graph 存在前端，撤销即重载回画布）
   type GraphVer = { graph: Record<string, unknown>; label: string; at: number };
@@ -56,6 +73,9 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const stopBuild = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    activities.filter((item) => item.status === "running" || item.status === "queued")
+      .filter((item) => item.sessionId === (sessionId || "draft") || item.sessionId === "draft")
+      .forEach((item) => cancelWorkflowBuild(item.id));
   };
 
   // 压入一个新版本：截掉当前之后的重做分支，超上限从头淘汰
@@ -108,6 +128,32 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [msgs]);
+
+  useEffect(() => subscribeWorkflowBuildActivities(setActivities), []);
+
+  // 后端已把终态消息和 graph 写入会话；当前页只重新载入，避免前后端各追加一次。
+  useEffect(() => {
+    if (!ready) return;
+    const key = sessionId || "draft";
+    for (const id of readHandledActivityIds(key)) handledActivities.current.add(id);
+    for (const activity of activities) {
+      if ((activity.sessionId !== key && activity.sessionId !== "draft") || !["done", "error"].includes(activity.status) || handledActivities.current.has(activity.id)) continue;
+      handledActivities.current.add(activity.id);
+      rememberHandledActivity(key, activity.id);
+      if (activity.id.startsWith("pending-")) {
+        setMsgs((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `请求失败：${activity.error || "未知错误"}` }]);
+        continue;
+      }
+      void getBuildSession(activity.sessionId).then((saved) => {
+        setMsgs((saved.msgs as Msg[]) || []);
+        if (saved.graph && Object.keys(saved.graph).length) {
+          postToFrame(frameRef.current?.contentWindow, "load", { workflow: saved.graph }, settings.comfyuiUrl);
+          pushVersion(saved.graph, activity.need.slice(0, 20) || "AI 生成");
+        }
+        refreshSessions();
+      }).catch(() => {});
+    }
+  }, [activities, ready, sessionId, settings.comfyuiUrl]);
 
   // 自动保存进度：对话变化后防抖 1.5s 存一次（有内容且画布就绪才存），避免刷新/重启丢进度
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,6 +236,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       });
       if (!buildSession.finishSave(generation, r.id)) return;
       if (!currentSessionId) { setSessionId(r.id); localStorage.setItem(LAST_KEY, r.id); }
+      if (!currentSessionId) sessionIdRef.current = r.id;
       refreshSessions();
       if (!silent) setNote(`已保存进度到「${r.name}」`);
     } catch (e) {
@@ -205,6 +252,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       const s = await getBuildSession(id);
       if (!buildSession.finishRestore(generation, s.id)) return;
       setSessionId(s.id);
+      sessionIdRef.current = s.id;
       setSessionName(s.name);
       skeletonIdRef.current = s.skeleton_id || "";
       setMsgs((s.msgs as Msg[]) || []);
@@ -227,6 +275,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     buildSession.startNew();
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     setSessionId("");
+    sessionIdRef.current = "";
+    sessionCreationRef.current = null;
     setSessionName("未命名工作流");
     skeletonIdRef.current = "";
     setMsgs([]);
@@ -275,34 +325,46 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     return r?.output || {};
   };
 
+  const ensureSessionForTask = async (graph: Record<string, unknown>, nextMsgs: Msg[] = msgs) => {
+    if (sessionIdRef.current) {
+      await saveBuildSession({
+        id: sessionIdRef.current, name: sessionName, msgs: nextMsgs,
+        graph, skeletonId: skeletonIdRef.current,
+      });
+      refreshSessions();
+      return sessionIdRef.current;
+    }
+    if (!sessionCreationRef.current) {
+      sessionCreationRef.current = saveBuildSession({
+        name: sessionName, msgs: nextMsgs, graph, skeletonId: skeletonIdRef.current,
+      }).then((saved) => {
+        sessionIdRef.current = saved.id;
+        setSessionId(saved.id);
+        localStorage.setItem(LAST_KEY, saved.id);
+        refreshSessions();
+        return saved.id;
+      }).finally(() => { sessionCreationRef.current = null; });
+    }
+    return sessionCreationRef.current;
+  };
+
   const doSend = async () => {
     const need = input.trim();
+    if (!need || !ready || !chat.modelName) return;
     setInput("");
-    const history: BuildTurn[] = msgs
-      .map(({ role, text }) => ({ role: role as BuildTurn["role"], text }));
-    push("user", need);
-    setBusy(true);
-    setNote("");
-    const ac = new AbortController();
-    abortRef.current = ac;
+    const history: BuildTurn[] = msgs.map(({ role, text }) => ({ role: role as BuildTurn["role"], text }));
+    const userMsg: Msg = { id: crypto.randomUUID(), role: "user", text: need };
+    const nextMsgs = [...msgs, userMsg];
+    setMsgs(nextMsgs);
     try {
-      if (advisor) {
-        // 顾问模式：先出人话方案，不改画布；「同意执行」时让搭建**照这段方案**来（原需求+方案一起）
-        const current = await readGraph();
-        const r = await buildPlan({ need, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, currentGraph: current, history, signal: ac.signal });
-        const execution = confirmedPlanExecution(need, r.plan);
-        setMsgs((m) => [...m, {
-          id: crypto.randomUUID(), role: "assistant", text: r.plan,
-          pendingNeed: execution.need, planText: r.plan, planOriginalNeed: need,
-        }]);
-      } else {
-        await doExecute(need, ac.signal, history);
-      }
+      const current = await readGraph();
+      const targetSessionId = await ensureSessionForTask(current, nextMsgs);
+      const hasNodes = Object.keys(current).length > 0;
+      const mode = advisor ? "plan" : direct ? "direct" : incremental && hasNodes ? "module" : "workflow";
+      enqueueWorkflowBuild({ need, mode, sessionId: targetSessionId, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir, currentGraph: current, history, direct, incremental });
+      setNote("已加入搭建队列；离开此页面后仍会继续运行。右下角活动入口可查看进度。");
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
     }
   };
 
@@ -363,30 +425,28 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       return;
     }
     const newNeed = `${need}\n\n【重要·节点替换要求】以下节点本机未安装，请改用括号内的本机已装平替节点重新搭建，不要再用未装的：\n${lines.join("\n")}`;
-    setBusy(true);
-    setNote("");
     try {
-      await doExecute(newNeed);
+      const current = await readGraph();
+      const targetSessionId = await ensureSessionForTask(current);
+      const history = msgs.map(({ role, text }) => ({ role: role as BuildTurn["role"], text }));
+      enqueueWorkflowBuild({ need: newNeed, mode: direct ? "direct" : incremental && Object.keys(current).length ? "module" : "workflow", sessionId: targetSessionId, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir, currentGraph: current, history, direct, incremental });
+      setNote("平替重搭已加入队列。");
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
     }
   };
 
   // 顾问模式「同意执行」：用方案对应的 need 真正生成
   const approvePlan = async (msgId: string, need: string) => {
     setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, pendingNeed: undefined } : x)));  // 收起按钮
-    setBusy(true);
-    setNote("");
     try {
-      await doExecute(need, undefined, []);
+      const current = await readGraph();
+      const targetSessionId = await ensureSessionForTask(current);
+      const mode = direct ? "direct" : incremental && Object.keys(current).length ? "module" : "workflow";
+      enqueueWorkflowBuild({ need, mode, sessionId: targetSessionId, chat, embed: settings.embedModel, comfyUrl: settings.comfyuiUrl, workflowDir: settings.workflowDir, currentGraph: current, history: msgs.map(({ role, text }) => ({ role: role as BuildTurn["role"], text })), direct, incremental });
+      setNote("确认执行已加入搭建队列。");
     } catch (e) {
       push("assistant", "请求失败：" + (e as Error).message);
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
     }
   };
 
@@ -579,7 +639,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
                 </div>
               </div>
             ))}
-            {busy && (
+            {activities.some((item) => item.sessionId === (sessionId || "draft") && item.status === "running") && (
               <div className="ai-build-msg assistant">
                 <div className="avatar"><Sparkles size={14} /></div>
                 <div className="bubble" style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -592,6 +652,20 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
               </div>
             )}
           </div>
+          {activities.filter((item) => (item.sessionId === (sessionId || "draft") || item.sessionId === "draft") && (item.status === "queued" || item.status === "running")).length > 0 && (
+            <div className="ai-build-activity-list">
+              {activities.filter((item) => (item.sessionId === (sessionId || "draft") || item.sessionId === "draft") && (item.status === "queued" || item.status === "running")).map((item) => (
+                <div className="ai-build-activity" key={item.id}>
+                  <span className="ai-build-activity-status">{item.status === "running" ? "思考中" : "排队中"}</span>
+                  <span className="ai-build-activity-text">{item.need}</span>
+                  <button className="btn" onClick={() => { cancelWorkflowBuild(item.id); setInput(item.need); setNote("已停止该条搭建，修改要求后可重新发送。"); }}>
+                    引导修改
+                  </button>
+                  <button className="icon-btn" title="取消这条搭建" onClick={() => cancelWorkflowBuild(item.id)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
           {!chat.modelName && (
             <p style={{ color: "var(--warning)", fontSize: 12, margin: "4px 0" }}>
               未配置对话模型，请先到「设置 → 对话模型」添加。

@@ -1,0 +1,11 @@
+{
+  "github_repo": "Carmenangle/ComfyUI-Wrapping-paper",
+  "app_exe": "ComfyUI-Wrapping-paper-Runtime.exe",
+  "runtime_dir": "data/runtime",
+  "data_dir": "data/userdata",
+  "port": 8010,
+  "edition": "standard",
+  "auto_start": true,
+  "auto_update": true,
+  "close_to_tray": true
+}

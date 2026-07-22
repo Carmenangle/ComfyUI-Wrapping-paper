@@ -172,7 +172,7 @@ export function ChatView({
 
   // 聊天会话引擎：messages/生成生命周期/持久化/编排全部集中在 useChatSession（见 lib/useChatSession）。
   const {
-    messages, streamingId, wfRunning, wfProgress, queued, regeneratingIds,
+    messages, streamingId, wfRunning, slowWatchPromptId, wfProgress, wfNode, queued, regeneratingIds,
     send, runCommand, pushBot,
     actOnPromptApproval, actOnRouteChoice, regenerateResult,
     pickTemplate, runWorkflow, updateCardDraft, markCardDone, markCardReopen,
@@ -352,7 +352,7 @@ export function ChatView({
             <button
               className="btn"
               onClick={clearCache}
-              disabled={compacting || !!streamingId || wfRunning}
+              disabled={compacting || !!streamingId}
               title="清空当前对话内容并删除本仓库上传的参考图（reference 文件夹）；资产库与知识库保留"
             >
               <Trash2 size={15} style={{ verticalAlign: "-2px", marginRight: 4 }} />
@@ -409,6 +409,7 @@ export function ChatView({
                   msg={m}
                   comfyUrl={settings.comfyuiUrl}
                   chatModel={chat}
+                  isBusy={!!streamingId || wfRunning}
                   onDraft={(draft) => updateCardDraft(m.id, draft)}
                   onDone={(draft, captured) => markCardDone(m.id, draft, captured)}
                   onReopen={() => markCardReopen(m.id)}
@@ -688,12 +689,15 @@ export function ChatView({
               onPick={(id) => update({ activeAgentId: id === "none" ? "" : id })}
             />
           )}
-          {(streamingId || wfRunning) ? (
+          {(streamingId || wfRunning || !!slowWatchPromptId) ? (
             <>
-              {wfRunning && wfProgress !== null && (
-                <div className="wf-progress" title={`工作流进度 ${wfProgress}%`}>
-                  <div className="wf-progress-bar" style={{ width: `${wfProgress}%` }} />
-                  <span className="wf-progress-txt">{wfProgress}%</span>
+              {(wfRunning || !!slowWatchPromptId) && wfProgress !== null && (
+                <div className="wf-progress-wrap">
+                  <div className="wf-progress" title={`工作流进度 ${wfProgress}%`}>
+                    <div className="wf-progress-bar" style={{ width: `${wfProgress}%` }} />
+                    <span className="wf-progress-txt">{wfProgress}%</span>
+                  </div>
+                  {wfNode && <span className="wf-progress-node" title="当前执行节点，若长时间不变可能卡住">{wfNode}</span>}
                 </div>
               )}
               {/* 生成中仍可发送：Enter 或点此 = 打断并合并（生图/工作流流程会先确认） */}

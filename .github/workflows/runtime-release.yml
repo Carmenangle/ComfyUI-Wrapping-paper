@@ -120,6 +120,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  launcher-build:
+    needs: [quality]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.11"
+      - name: 构建独立更新启动器
+        run: |
+          python -m pip install -r release/launcher-requirements.txt
+          python scripts/launcher_release.py build --output-dir release-assets --work-dir .launcher-work
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-windows-x64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
   source-build:
     needs: [plan, quality]
     strategy:
@@ -154,7 +173,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [plan, build, source-build]
+    needs: [plan, build, source-build, launcher-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -162,10 +181,18 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+      - name: 组装 Windows 便携支撑包
+        run: >-
+          python scripts/portable_release.py build
+          --version "${{ needs.plan.outputs.version }}"
+          --assets-dir release-assets
+          --output-dir release-assets
+          --work-dir .portable-work
       - name: 附加分片合并工具
         run: cp scripts/join-runtime.ps1 scripts/join-runtime.sh release-assets/
       - uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
+          body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           overwrite_files: true

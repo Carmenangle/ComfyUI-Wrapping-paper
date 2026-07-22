@@ -60,15 +60,50 @@ def _norm_pack(pid: str, p: dict) -> dict:
 
 
 def list_installed(comfy_url: str, comfy_path: str = "") -> list[dict]:
-    """本机已装节点包（state ∈ enabled/disabled）。供「插件节点更新」tab。
-    comfy_path 给出时，补每个包的本地 git 信息（commit/date/is_git），对齐图1的启动器。"""
+    """本机已装节点包。供「插件节点更新」tab。
+    以 ComfyUI-Manager 收录列表为主，comfy_path 给出时再扫磁盘：
+    补每个包的本地 git 信息，并把 Manager 未收录但磁盘存在的目录也补进来
+    （手动 clone/未知来源），避免数量少于实际。结果按名称排序。"""
     d = _get(comfy_url, "/customnode/getlist?mode=installed&skip_update=true")
     packs = d.get("node_packs", {}) or {}
     items = [_norm_pack(pid, p) for pid, p in packs.items()
              if p.get("state") in ("enabled", "disabled")]
     if comfy_path:
-        _merge_git_info(items, local_git_info(comfy_path))
+        git = local_git_info(comfy_path)
+        _merge_git_info(items, git)
+        _append_unmanaged_dirs(items, git)
+    items.sort(key=lambda it: (it.get("title") or it.get("id") or "").lower())
     return items
+
+
+def _append_unmanaged_dirs(items: list[dict], git: dict) -> None:
+    """把磁盘 custom_nodes 里存在、但 Manager 列表未覆盖的目录补进 items。
+    这些是手动 clone 或未收录的包，只靠 getlist 会漏掉。"""
+    covered = {str(it.get("dir", "")).lower() for it in items if it.get("dir")}
+    # Manager 包名也纳入去重（有的包匹配不到 git 目录，dir 为空但确实是同一个）
+    covered |= {str(it.get("id", "")).lower() for it in items}
+    covered |= {str(it.get("title", "")).lower() for it in items}
+    for dirname, info in git.get("by_dir", {}).items():
+        if dirname in covered:
+            continue
+        items.append({
+            "id": info["dir"],
+            "title": info["dir"],
+            "author": "",
+            "repository": info.get("remote", ""),
+            "description": "本机目录（ComfyUI-Manager 未收录）",
+            "install_type": "git-clone" if info.get("is_git") else "unknown",
+            "state": "enabled",
+            "updatable": False,
+            "version": "",
+            "stars": 0,
+            "last_update": "",
+            "trust": False,
+            "commit": info.get("commit", ""),
+            "git_date": info.get("date", ""),
+            "is_git": info.get("is_git"),
+            "dir": info["dir"],
+        })
 
 
 def _merge_git_info(items: list[dict], git: dict) -> None:
@@ -216,6 +251,8 @@ def local_git_info(comfy_path: str) -> dict:
     for entry in base.iterdir():
         if not entry.is_dir() or entry.name.startswith(".") or entry.name.endswith(".disabled"):
             continue
+        if entry.name in ("__pycache__", "__init__") or entry.name.startswith("__"):
+            continue  # Python 缓存等非节点目录，不计入已装列表
         d = str(entry)
         is_git = (entry / ".git").exists()
         info = {"dir": entry.name, "commit": "", "date": "", "remote": "", "is_git": is_git}
@@ -359,69 +396,78 @@ def _iter_nodes(workflow: dict):
 _CORE_IDS = {"comfy-core", "", None}
 
 
-def _extract_pack_ids(workflow: dict) -> tuple[set[str], set[str]]:
-    """从节点 properties 的 cnr_id/aux_id 提取工作流依赖的插件包标识（图2做法，准）。
-    返回 (pack_ids, class_types_without_pack)：
-    - pack_ids：非内置的 cnr_id/aux_id 集合（真正依赖的插件包）
-    - class_types_without_pack：没带包标识的节点 type（旧工作流兜底用）
-    """
-    pack_ids: set[str] = set()
-    orphan_types: set[str] = set()
+# 不参与依赖判定的节点类型（前端虚拟节点/注释/中转）
+_SKIP_NODE_TYPES = {"Note", "Reroute", "PrimitiveNode", "MarkdownNote", "Reroute (rgthree)"}
+
+
+def _node_type_to_pack(workflow: dict) -> dict[str, str]:
+    """遍历工作流，返回 {class_type: pack_id}。
+    pack_id 取该节点 properties 的 cnr_id（非内置时）或 aux_id，拿不到则空串。
+    只是"该节点自称属于哪个包"，是否真装以 object_info 为准。"""
+    type_to_pack: dict[str, str] = {}
     for n in _iter_nodes(workflow):
+        ntype = n.get("type") or n.get("class_type") or ""
+        if not ntype or ntype in _SKIP_NODE_TYPES:
+            continue
         props = n.get("properties", {}) or {}
         cnr = props.get("cnr_id")
         aux = props.get("aux_id")
-        ntype = n.get("type") or n.get("class_type") or ""
-        if cnr not in _CORE_IDS:
-            pack_ids.add(str(cnr))
-        elif aux:  # aux_id 是 GitHub owner/repo 形式的包标识
-            pack_ids.add(str(aux))
-        elif cnr is None and ntype and ntype not in ("Note", "Reroute", "PrimitiveNode", "MarkdownNote"):
-            # 没有 cnr_id 的老工作流：留节点名走 class_type 兜底
-            orphan_types.add(ntype)
-    return pack_ids, orphan_types
+        pack = ""
+        if cnr is not None and cnr not in _CORE_IDS:
+            pack = str(cnr)
+        elif aux:  # aux_id 是 GitHub owner/repo 形式
+            pack = str(aux)
+        # 已记录过非空包 id 的类型不覆盖为空
+        if ntype not in type_to_pack or (pack and not type_to_pack[ntype]):
+            type_to_pack[ntype] = pack
+    return type_to_pack
 
 
 def analyze_workflow(comfy_url: str, workflow: dict) -> dict:
     """识别工作流依赖但本机未装的插件包。
-    优先用节点自带的 cnr_id/aux_id（准确）；老工作流没有时按 class_type 反查兜底。
+    唯一的"已安装"真相源是 ComfyUI 实时 object_info（实际加载的节点类型）——
+    只有 object_info 里没有的 class_type 才算缺失，避免包 id 命名不一致导致的误判。
+    再对缺失节点用 cnr_id/aux_id 和 getmappings 反查安装包。
     返回 {missing_packs:[包id...], packs:[可装的包对象...], unresolved:[无法定位的节点名]}。"""
     from app.services import comfyui_client as _cc
 
-    pack_ids, orphan_types = _extract_pack_ids(workflow)
+    type_to_pack = _node_type_to_pack(workflow)
 
-    # 已装包：market 里 state ∈ enabled/disabled 的 id 集合
+    # 已加载节点类型 = 已安装的唯一判据
+    try:
+        installed_types = set(_cc.fetch_object_info(comfy_url).keys())
+    except ComfyError:
+        installed_types = set()
+
+    # 工作流里、object_info 中不存在的 class_type = 真正缺失的节点
+    missing_types = {t for t in type_to_pack if t not in installed_types}
+    if not missing_types:
+        return {"missing_packs": [], "packs": [], "unresolved": []}
+
     market_list = list_market(comfy_url)
     market = {p["id"]: p for p in market_list}
-    installed_ids = {p["id"] for p in market_list if p["state"] in ("enabled", "disabled")}
 
-    # 1) 按包标识找缺失（主路径）
-    missing_ids = {pid for pid in pack_ids if pid not in installed_ids}
+    # getmappings：class_type → pack_id 反查表（兜底解析）
+    node_to_pack: dict[str, str] = {}
+    try:
+        mappings = _get(comfy_url, "/customnode/getmappings?mode=local")
+        for pk, val in mappings.items():
+            names = val[0] if isinstance(val, list) and val else []
+            for nm in names:
+                node_to_pack.setdefault(nm, pk)
+    except ComfyError:
+        pass
 
-    # 2) 老工作流的 orphan 节点：按 class_type → getmappings 反查包（兜底）
+    missing_ids: set[str] = set()
     unresolved: list[str] = []
-    if orphan_types:
-        try:
-            object_info = _cc.fetch_object_info(comfy_url)
-            installed_types = set(object_info.keys())
-        except ComfyError:
-            installed_types = set()
-        still_missing = sorted(orphan_types - installed_types)
-        if still_missing:
-            mappings = _get(comfy_url, "/customnode/getmappings?mode=local")
-            node_to_pack: dict[str, str] = {}
-            for pk, val in mappings.items():
-                names = val[0] if isinstance(val, list) and val else []
-                for nm in names:
-                    node_to_pack.setdefault(nm, pk)
-            for nm in still_missing:
-                pk = node_to_pack.get(nm)
-                if pk and pk not in installed_ids:
-                    missing_ids.add(pk)
-                elif not pk:
-                    unresolved.append(nm)
+    for ntype in sorted(missing_types):
+        pid = type_to_pack.get(ntype) or node_to_pack.get(ntype) or ""
+        if pid:
+            missing_ids.add(pid)
+        else:
+            unresolved.append(ntype)
 
-    # 缺失包 id → market 里的包对象
+    # 缺失包 id → market 里的包对象；只有解析到真实 repository 的才可一键安装
     packs: list[dict] = []
     for pid in sorted(missing_ids):
         p = market.get(pid)
@@ -430,7 +476,15 @@ def analyze_workflow(comfy_url: str, workflow: dict) -> dict:
                 if pid in (cand.get("repository", ""), cand.get("id", "")):
                     p = cand
                     break
-        packs.append(p or {"id": pid, "title": pid, "state": "not-installed", "repository": pid})
+        if p and p.get("repository"):
+            packs.append(p)
+        else:
+            # market 里找不到有效仓库地址：不放进可一键安装列表，交给 unresolved 提示手动查找
+            unresolved.append(pid)
 
-    return {"missing_packs": sorted(missing_ids), "packs": packs, "unresolved": unresolved}
+    return {
+        "missing_packs": sorted(missing_ids),
+        "packs": packs,
+        "unresolved": sorted(set(unresolved)),
+    }
 

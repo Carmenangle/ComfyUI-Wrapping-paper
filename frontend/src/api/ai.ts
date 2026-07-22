@@ -339,6 +339,48 @@ export function cancelAgent(threadId: string) {
   });
 }
 
+// 当前有后台生成任务在跑的所有仓库 thread（后台活动面板据此列出正在跑的仓库对话）
+export function fetchRunningChatThreads() {
+  return apiGet<{ threads: string[] }>("/ai/image-agent/running-threads");
+}
+
+// ---- 仓库对话排队消息：后端持久化队列（离开页面/刷新后仍继续）----
+export type ChatQueueStatus = "queued" | "running" | "done" | "error" | "cancelled";
+export interface ChatQueueTask {
+  id: string; thread_id: string; need: string;
+  status: ChatQueueStatus; error?: string; created_at: number; updated_at: number;
+}
+// multiAgent 完整参数落后端队列；worker 在前一条结束后串行认领执行。
+export function enqueueChatQueueTask(payload: {
+  threadId: string; message: string; images: string[];
+  imageMask?: { image: string; mask: string } | null;
+  chat: Chat; gen: Chat; video?: Chat; embed?: Embed;
+  size: string; imageQuality: string; outputDir: string; repoId: string;
+  proxyUrl: string; styleTemplate: string; agentId: string; contextMaxTokens: number;
+}) {
+  return apiPost<{ task: ChatQueueTask }>("/ai/chat-queue/enqueue", {
+    thread_id: payload.threadId,
+    message: payload.message,
+    images: payload.images,
+    image_mask: payload.imageMask || null,
+    ...chatBody(payload.chat),
+    gen_base_url: payload.gen.baseUrl, gen_api_key: payload.gen.apiKey, gen_model: payload.gen.modelName,
+    video_base_url: payload.video?.baseUrl || "", video_api_key: payload.video?.apiKey || "",
+    video_model: payload.video?.modelName || "",
+    size: payload.size, image_quality: payload.imageQuality,
+    output_dir: payload.outputDir, repo_id: payload.repoId,
+    ...sseEmbed(payload.embed),
+    proxy_url: payload.proxyUrl, style_template: payload.styleTemplate,
+    agent_id: payload.agentId, context_max_tokens: payload.contextMaxTokens,
+  });
+}
+export function listChatQueueTasks(threadId = "") {
+  return apiGet<{ tasks: ChatQueueTask[] }>(`/ai/chat-queue?thread_id=${encodeURIComponent(threadId)}`);
+}
+export function cancelChatQueueTask(taskId: string) {
+  return apiPost<{ task: ChatQueueTask }>("/ai/chat-queue/cancel", { task_id: taskId });
+}
+
 // ---- AI 搭工作流：节点知识库 + 自动搭建 ----
 
 type ChatCfg = { baseUrl: string; apiKey: string; modelName: string };
@@ -488,6 +530,30 @@ export function saveBuildSession(args: {
 }
 export function deleteBuildSession(id: string) {
   return apiPost<{ ok: boolean }>("/ai/build/session/delete", { id });
+}
+
+export type WorkflowBuildTaskStatus = "queued" | "running" | "done" | "error" | "cancelled";
+export interface WorkflowBuildTask {
+  id: string; session_id: string; mode: "direct" | "module" | "workflow" | "plan";
+  need: string; status: WorkflowBuildTaskStatus; result?: BuildResult | { plan: string };
+  error?: string; created_at: number; updated_at: number;
+}
+export function enqueueWorkflowBuildTask(payload: {
+  sessionId: string; mode: WorkflowBuildTask["mode"]; need: string;
+  chat: Chat; embed: Embed; comfyUrl: string; workflowDir: string;
+  currentGraph: Record<string, unknown>; history: BuildTurn[];
+}) {
+  return apiPost<WorkflowBuildTask>("/ai/build/tasks", {
+    session_id: payload.sessionId, mode: payload.mode, need: payload.need,
+    ...chatBody(payload.chat), comfy_url: payload.comfyUrl, workflow_dir: payload.workflowDir,
+    ...sseEmbed(payload.embed), current_graph: payload.currentGraph, history: payload.history,
+  });
+}
+export function listWorkflowBuildTasks(sessionId = "") {
+  return apiGet<{ tasks: WorkflowBuildTask[] }>(`/ai/build/tasks?session_id=${encodeURIComponent(sessionId)}`);
+}
+export function cancelWorkflowBuildTask(id: string) {
+  return apiPost<WorkflowBuildTask>("/ai/build/task/cancel", { id });
 }
 
 // 生图完成后把这次生成的提示词/标签/图片入全局 RAG 知识库

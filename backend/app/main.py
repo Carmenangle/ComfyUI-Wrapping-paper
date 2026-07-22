@@ -8,10 +8,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
+from app.services.workflow_build_tasks import start_worker as start_workflow_build_worker
+from app.services.chat_agent_queue import start_worker as start_chat_agent_queue_worker
 from app.routers import ai, ai_providers, agents, assets, characters, comfyui, loras, mcp, models, node_manager, rag, runs, skills, user_state, workflows
 
 app = FastAPI(title="Local AI ComfyUI Frontend API")
 init_db()
+start_workflow_build_worker()
+start_chat_agent_queue_worker()
 
 # 默认只服务本机：这是单机桌面壳，含无鉴权的进程控制/文件读写接口（start/stop/interrupt/
 # save-local/local-view 等）。CORS 只挡浏览器跨源，挡不住非浏览器客户端；故加回环门禁作纵深防御。

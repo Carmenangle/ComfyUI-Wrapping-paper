@@ -30,7 +30,7 @@ def test_runtime_target_matrix_covers_supported_editions_and_platforms():
     assert all(target.python_version == "3.13.11" for target in targets.values())
 
 
-def test_standard_and_full_rag_pyinstaller_plans_are_distinct(tmp_path):
+def test_standard_and_full_rag_share_external_app_base(tmp_path):
     targets = runtime_release.load_targets(ROOT / "release" / "runtime-targets.json")
     standard = runtime_release.pyinstaller_command(
         targets["windows-x64-standard"], ROOT, tmp_path
@@ -39,17 +39,19 @@ def test_standard_and_full_rag_pyinstaller_plans_are_distinct(tmp_path):
         targets["windows-x64-full-rag"], ROOT, tmp_path
     )
 
-    assert "sentence_transformers" in standard
-    assert "--exclude-module" in standard
-    assert "--collect-all" in full
-    assert "sentence_transformers" in full
-    full_excludes = {
-        full[index + 1]
-        for index, value in enumerate(full[:-1])
-        if value == "--exclude-module"
-    }
-    assert "sentence_transformers" not in full_excludes
-    assert "torch" not in full_excludes
+    assert standard == full
+    spec = (ROOT / "release" / "runtime-layered.spec").read_text(encoding="utf-8")
+    assert 'entry[0].startswith("app.")' in spec
+    assert '"sentence_transformers", "transformers", "torch"' in spec
+
+
+def test_base_id_ignores_edition_but_rag_id_tracks_accelerator():
+    targets = runtime_release.load_targets(ROOT / "release" / "runtime-targets.json")
+    standard = targets["windows-x64-standard"]
+    full = targets["windows-x64-full-rag"]
+
+    assert runtime_release.base_id(ROOT, standard) == runtime_release.base_id(ROOT, full)
+    assert runtime_release.rag_id(ROOT, full)
 
 
 def test_runtime_environment_uses_writable_data_without_bundled_models(tmp_path):
@@ -147,3 +149,19 @@ def test_runtime_self_check_resolves_relative_tree_before_changing_cwd(
 
     assert Path(seen["command"][0]).is_absolute()
     assert Path(seen["cwd"]).is_absolute()
+
+
+def test_application_layer_keeps_backend_source_visible(tmp_path):
+    root = tmp_path / "project"
+    (root / "backend" / "app").mkdir(parents=True)
+    (root / "backend" / "app" / "main.py").write_text("app = None", encoding="utf-8")
+    (root / "comfyui-ext").mkdir()
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("ok", encoding="utf-8")
+    tree = tmp_path / "application"
+
+    runtime_release.build_application_tree(root, frontend, tree, "v0.15")
+
+    assert (tree / "backend" / "app" / "main.py").is_file()
+    assert not (tree / "backend.zip").exists()

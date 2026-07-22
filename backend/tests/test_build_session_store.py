@@ -89,3 +89,50 @@ def test_save_is_atomic_no_tmp_left(tmp_path):
     leftovers = list(tmp_path.glob("*.tmp"))
     assert leftovers == []                                 # 原子替换后无残留 .tmp
     assert json.loads((tmp_path / "x.json").read_text(encoding="utf-8"))["id"] == "x"
+
+
+def test_task_result_updates_graph_and_appends_message_once():
+    bss.save_session("task-session", "T", [{"role": "user", "text": "生成"}], {"old": {}})
+    result = {
+        "ok": True,
+        "graph": {"1": {"class_type": "SaveImage", "inputs": {}}},
+        "missing_nodes": ["MissingNode"],
+        "alternatives": {"MissingNode": ["LocalNode"]},
+    }
+
+    assert bss.apply_task_result("task-session", "task-1", "direct", "生成", result=result)
+    assert bss.apply_task_result("task-session", "task-1", "direct", "生成", result=result)
+
+    session = bss.get_session("task-session")
+    assert session["graph"] == result["graph"]
+    task_msgs = [msg for msg in session["msgs"] if msg.get("task_id") == "task-1"]
+    assert len(task_msgs) == 1
+    assert task_msgs[0]["missingNodes"] == ["MissingNode"]
+
+
+def test_task_plan_and_failure_are_persisted_without_recreating_deleted_session():
+    bss.save_session("plan", "P", [], {})
+    assert bss.apply_task_result(
+        "plan", "task-plan", "plan", "做一个工作流", result={"plan": "先加载模型"},
+    )
+    plan_msg = bss.get_session("plan")["msgs"][-1]
+    assert plan_msg["planText"] == "先加载模型"
+    assert "已和用户确认的搭建方案" in plan_msg["pendingNeed"]
+
+    assert bss.apply_task_result("plan", "task-error", "direct", "继续", error="模型超时")
+    assert bss.get_session("plan")["msgs"][-1]["text"] == "请求失败：模型超时"
+    assert bss.apply_task_result("missing", "task", "direct", "继续", result={}) is False
+
+
+def test_stale_frontend_save_does_not_erase_unseen_task_result():
+    old_graph = {"old": {}}
+    new_graph = {"new": {}}
+    bss.save_session("race", "R", [{"role": "user", "text": "生成"}], old_graph)
+    bss.apply_task_result(
+        "race", "task-race", "direct", "生成", result={"ok": True, "graph": new_graph},
+    )
+
+    bss.save_session("race", "R", [{"role": "user", "text": "生成"}], old_graph)
+    saved = bss.get_session("race")
+    assert saved["graph"] == new_graph
+    assert [msg.get("task_id") for msg in saved["msgs"]].count("task-race") == 1

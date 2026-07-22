@@ -107,13 +107,16 @@ def get_template_raw(template_id: str) -> dict:
     tpl = template_store.get_template(template_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="模板不存在")
-    src = tpl.get("source_path", "")
-    if not src or not Path(src).is_file():
-        raise HTTPException(status_code=400, detail="模板缺少原始工作流文件")
-    try:
-        workflow = json.loads(Path(src).read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise HTTPException(status_code=400, detail=f"工作流 JSON 解析失败：{e}")
+    # 优先用保存时嵌入的快照（独立于源文件后续修改）；旧模板回退到 source_path
+    workflow = tpl.get("workflow_data")
+    if workflow is None:
+        src = tpl.get("source_path", "")
+        if not src or not Path(src).is_file():
+            raise HTTPException(status_code=400, detail="模板缺少原始工作流文件")
+        try:
+            workflow = json.loads(Path(src).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"工作流 JSON 解析失败：{e}")
     exposed_ids = template_store.ordered_node_ids(tpl)
     order = tpl.get("node_order", [])
     input_ids = tpl.get("input_node_ids", [])

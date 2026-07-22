@@ -32,6 +32,12 @@ def is_active(thread_id: str) -> bool:
         return thread_id in _active
 
 
+def active_threads() -> list[str]:
+    """当前有活动运行的所有 thread（供后台面板列出正在跑的仓库对话）。"""
+    with _lock:
+        return list(_active.keys())
+
+
 def admit(thread_id: str, cancel_event: threading.Event) -> Admission:
     """登记一次运行；同一 thread 已有活动运行时抛 RunAlreadyActive。"""
     admission = Admission(thread_id, cancel_event)

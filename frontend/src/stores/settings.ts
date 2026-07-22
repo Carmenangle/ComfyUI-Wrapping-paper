@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getUserState } from "../api/userState";
 import { pushSettings } from "../lib/userStateSync";
 
-export type ManualTheme = "bright" | "night" | "eye-care" | "green" | "gray" | "high-contrast";
+export type ManualTheme = "bright" | "night" | "eye-care" | "green" | "gray";
 export type Theme = ManualTheme | "system";
 
 const MANUAL_THEMES: readonly ManualTheme[] = [
@@ -11,7 +11,6 @@ const MANUAL_THEMES: readonly ManualTheme[] = [
   "eye-care",
   "green",
   "gray",
-  "high-contrast",
 ];
 
 export interface ChatModel {

@@ -18,11 +18,14 @@ import {
   fetchHistory, multiAgent,
   saveSnapshot, fetchSnapshot, fetchAgentRunning, cancelAgent,
   fetchInspiration, regenerateImage as replayImageGeneration,
+  enqueueChatQueueTask, listChatQueueTasks, cancelChatQueueTask,
 } from "../api/ai";
+import { refreshChatBackgroundActivities } from "./chatBackgroundActivity";
 import type { ChatStreamEvent } from "../api/chatStreamProtocol";
 import {
   reduce as reduceGen, initialGenState,
-  streamingBotId, needsConfirm, runningPromptId, queuedItem,
+  streamingBotId, needsConfirm, runningPromptId,
+  type QueueItem,
 } from "./generationLifecycle";
 import { useWorkflowOrchestration } from "./workflowOrchestration";
 import { subscribeProgress } from "./comfyProgress";
@@ -90,12 +93,17 @@ export function useChatSession(deps: ChatSessionDeps) {
   // 只读派生别名
   const streamingId = streamingBotId(gen);             // 正在流式的 bot 气泡 id（渲染转圈用）
   const wfRunning = gen.status.kind === "workflow";    // /s 工作流进行中
-  const queued = gen.queue;                            // 排队列表（渲染队列条用）
+  // 排队列表：后端持久化队列（离开页面/刷新后仍在），按本仓库过滤。
+  // 内容(RichContent)后端只存 multiAgent payload；UI 的编辑回填/引导另存本地映射，缺失则用文本兜底。
+  const [queued, setQueued] = useState<QueueItem[]>([]);
   const [wfProgress, setWfProgress] = useState<number | null>(null);  // 工作流实时进度%（WS，null=无）
+  const [wfNode, setWfNode] = useState<string>("");  // 当前执行的节点显示名（WS executing 消息）
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
   const wsUnsubRef = useRef<(() => void) | null>(null);  // 当前进度 WS 退订
   const abortRef = useRef<{ botId: string; abort: () => void } | null>(null);  // 中断当前流式生成及其所有者
   const bgRunningRef = useRef(false);  // 后台任务进行中：此时后端拥有快照写权，前端不抢写以免覆盖
+  // 慢守望阶段（releaseBusy 后仍在轮询）：wfRunning 已 false，但仍需显示停止键
+  const [slowWatchPromptId, setSlowWatchPromptId] = useState<string | null>(null);
   // 对话线 id = 仓库 id（首页用 "home"）：后端按此落盘多轮记忆与 RAG 知识库
   const threadId = repo?.id || "home";
   const activeThreadRef = useRef(threadId);
@@ -105,6 +113,41 @@ export function useChatSession(deps: ChatSessionDeps) {
   const chatKey = `laf_chat_${threadId}`;
   const loadedRef = useRef(false);  // 标记本仓库消息已加载，避免初始空数组覆盖已存记录
   const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);  // 后端快照防抖
+  // 队列项内容本地映射：后端队列只存 multiAgent payload，UI 的编辑回填/引导需要原始 RichContent。
+  const queueContentKey = `laf_chat_queue_content_${threadId}`;
+  const readQueueContent = (): Record<string, RichContent> => {
+    try { return JSON.parse(localStorage.getItem(queueContentKey) || "{}"); } catch { return {}; }
+  };
+  const saveQueueContent = (taskId: string, content: RichContent) => {
+    try {
+      const map = readQueueContent();
+      map[taskId] = content;
+      localStorage.setItem(queueContentKey, JSON.stringify(map));
+    } catch { /* 超额忽略，UI 用文本兜底 */ }
+  };
+  const dropQueueContent = (taskId: string) => {
+    try {
+      const map = readQueueContent();
+      delete map[taskId];
+      localStorage.setItem(queueContentKey, JSON.stringify(map));
+    } catch { /* ignore */ }
+  };
+  // 从后端拉取本仓库排队消息，投影为队列条（内容优先取本地映射，缺失用文本兜底）。
+  const refreshQueue = async () => {
+    if (threadId === "home") { setQueued([]); return; }
+    try {
+      const { tasks } = await listChatQueueTasks(threadId);
+      const contentMap = readQueueContent();
+      const items: QueueItem[] = tasks
+        .filter((task) => task.status === "queued" || task.status === "running")
+        .map((task) => ({
+          id: task.id,
+          text: task.status === "running" ? `发送中…${task.need ? "：" + task.need : ""}` : task.need,
+          content: contentMap[task.id] || { parts: [], text: task.need, images: [] },
+        }));
+      setQueued(items);
+    } catch { /* 后端未起：保持已有 */ }
+  };
 
   const pushBot = (text: string) =>
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", text }]);
@@ -158,6 +201,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     messages,
     setMessages,
     isBusy: !!streamingId || wfRunning,
+    isStreaming: !!streamingId,
     chat,
     embed: settings.embedModel,
     outputDir: settings.outputDir,
@@ -430,6 +474,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     wsUnsubRef.current?.();
     wsUnsubRef.current = null;
     setWfProgress(null);
+    setWfNode("");
   };
 
   const pollResult = (
@@ -442,11 +487,21 @@ export function useChatSession(deps: ChatSessionDeps) {
       ? regeneration.comfyuiUrl
       : settings.comfyuiUrl;
     dispatch({ t: "workflowStart", promptId });  // 状态 C：工作流出图中
+    // 节点 id → 类型名映射（用 capturedGraph，API 格式 {id:{class_type,inputs}}）
+    const graph = regeneration?.kind === "workflow" ? regeneration.graph : null;
+    const nodeLabel = (id: string): string => {
+      try {
+        const node = (graph as Record<string, { class_type?: string }>)?.[id];
+        return node?.class_type ? `${node.class_type} (#${id})` : `节点 #${id}`;
+      } catch { return `节点 #${id}`; }
+    };
     // 实时进度：直连 ComfyUI /ws（完成判定仍以下方轮询为准，WS 只驱动进度条）
     stopProgress();
     setWfProgress(0);
+    setWfNode("");
     wsUnsubRef.current = subscribeProgress(comfyuiUrl, promptId, {
       onProgress: (pct) => setWfProgress(pct),
+      onNode: (id) => setWfNode(nodeLabel(id)),
     });
     let tries = 0;
     const tick = async () => {
@@ -455,13 +510,25 @@ export function useChatSession(deps: ChatSessionDeps) {
         const r = await getResult(promptId, comfyuiUrl, outputNodeIds);
         if (r.status === "completed") {
           const got = await finalizeGeneration(r, promptId);
-          // 仅当确实无任何产出时提示；去重跳过(got=false 但 r 有内容)不误报
           if (!got && (r.images?.length || 0) === 0 && (r.videos?.length || 0) === 0 && !pickBestText(r.texts)) {
             pushBot("生成完成，但没有输出（工作流未含 SaveImage / 视频合成 / 文字输出节点）。");
           }
           removePending(promptId);
           stopProgress();
-          dispatch({ t: "workflowDone", promptId });  // reducer 内置所有权守卫，只清自己这轮
+          setSlowWatchPromptId(null);
+          dispatch({ t: "workflowDone", promptId });
+          return;
+        }
+        if (r.status === "not_found") {
+          // 任务丢失：只有 promptId 还在 pending 里才报错，
+          // 若已被 removePending 清掉说明任务已正常完成，静默结束轮询
+          if (!getPending().some((p) => p.prompt_id === promptId)) { setSlowWatchPromptId(null); return; }
+          removePending(promptId);
+          stopProgress();
+          setSlowWatchPromptId(null);
+          refreshChatBackgroundActivities();
+          dispatch({ t: "workflowDone", promptId });
+          pushBot("⚠️ 出图任务已丢失（ComfyUI 可能已重启或队列被清空）。如需重新生图，请点工作流卡片的「运转工作流」。");
           return;
         }
       } catch {
@@ -472,13 +539,18 @@ export function useChatSession(deps: ChatSessionDeps) {
       // 甚至更久)出图后也能被这条守望自动 finalize，不再丢图。
       const schedule = pollSchedule(tries);
       if (schedule.releaseBusy) {
-        // 快轮询阶段结束仍没完成：解除"运转中"占用不阻塞操作，但继续后台慢守望。
+        // 快轮询阶段结束仍没完成：解除"运转中"占用不阻塞操作，进入慢守望。
+        // 保留 slowWatchPromptId 使停止键继续可见，用户仍可取消。
         stopProgress();
         dispatch({ t: "workflowDone", promptId });
+        setSlowWatchPromptId(promptId);
         pushBot("生成较复杂、仍在后台进行，出图后会自动载入（也可在 ComfyUI 面板看进度）。");
       }
       if (schedule.delayMs !== null) {
         setTimeout(tick, schedule.delayMs);
+      } else {
+        // 达上限仍未出：慢守望结束，清除停止键
+        setSlowWatchPromptId(null);
       }
       // 达 210 次(约 20 分钟)仍未出：停止本轮守望，但保留 pending，
       // 下次进仓库/刷新由 resume 兜底重查。
@@ -491,6 +563,7 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // /s 启动：取最近一张已确认的工作流卡，用抓取到的画布工作流提交生成
   const runWorkflow = async (cardId?: string) => {
+    if (wfRunning || !!streamingId) return;  // 防重复提交：已有任务在跑时忽略
     const card = cardId
       ? messages.find((m) => m.id === cardId && m.workflow?.done)
       : [...messages].reverse().find((m) => m.workflow?.done);
@@ -641,32 +714,51 @@ export function useChatSession(deps: ChatSessionDeps) {
     runFreeText(raw, content);
   };
 
-  // 把消息加入队列
+  // 把消息加入后端持久化队列：worker 在前一条结束后串行认领执行（离开页面/刷新仍继续）。
+  // 后端只存 multiAgent 执行参数；UI 编辑/引导所需的原始 RichContent 另存本地映射。
   const enqueue = (content: RichContent) => {
-    dispatch({ t: "enqueue", item: { id: crypto.randomUUID(), text: content.text.trim(), content } });
+    if (threadId === "home") return;  // 首页临时草稿区不进后端队列
+    const text = content.text.trim();
+    const images = content.images || [];
+    void enqueueChatQueueTask({
+      threadId,
+      message: text,
+      images,
+      imageMask: content.maskedImage
+        ? { image: content.maskedImage.image, mask: content.maskedImage.mask } : null,
+      chat,
+      gen: genModel,
+      video: videoModel,
+      embed: settings.embedModel,
+      size, imageQuality,
+      outputDir: settings.outputDir, repoId: repo?.id || threadId,
+      proxyUrl: settings.proxyEnabled ? settings.proxyUrl : "",
+      styleTemplate: activeStyleTemplate(settings), agentId: settings.activeAgentId || "",
+      contextMaxTokens: settings.contextMaxTokens,
+    }).then((res) => {
+      if (res.task?.id) saveQueueContent(res.task.id, content);
+      void refreshQueue();
+      refreshChatBackgroundActivities();
+    }).catch(() => { /* 后端未起：忽略，无持久化 */ });
   };
 
-  // 当前轮生成结束后，自动取队首执行下一条
-  const flushQueue = () => {
-    const next = gen.queue[0];
-    if (!next) return;
-    dispatch({ t: "dequeue" });
-    dispatchSend(next.content);
-  };
-
-  // 取消队列里的某条
+  // 取消队列里的某条（后端删除 + 清本地内容映射）
   const cancelQueued = (id: string) => {
-    dispatch({ t: "removeQueued", id });
+    dropQueueContent(id);
+    setQueued((current) => current.filter((item) => item.id !== id));  // 本地即时移除
+    void cancelChatQueueTask(id).catch(() => {});
+    void refreshQueue();
+    refreshChatBackgroundActivities();
   };
 
-  // 生成结束（idle）后自动出队执行下一条
+  // 进入/切回仓库时拉取后端排队消息；页面在场时定时刷新，反映 worker 推进后的出队。
   useEffect(() => {
-    if (gen.status.kind === "idle" && gen.queue.length > 0) {
-      const t = setTimeout(flushQueue, 0);  // 让本轮状态落定再发，避免同步竞态
-      return () => clearTimeout(t);
-    }
+    void refreshQueue();
+    if (threadId === "home") return;
+    const timer = setInterval(() => { void refreshQueue(); }, 2000);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gen.status.kind, gen.queue.length]);
+  }, [threadId]);
 
   // AI 建议按钮点击：执行单条指令（/w 选模板、/s 出图）。其余走智能体。
   const runCommand = (cmd: string) => {
@@ -883,7 +975,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     abortRef.current = null;
   };
 
-  // 中断当前生成（「停止」按钮）
+  // 中断当前生成（「停止」按钮）——兼容快轮询阶段（wfRunning）和慢守望阶段（slowWatchPromptId）
   const stopGenerating = async () => {
     if (needsConfirm(gen)) {
       const ok = await askConfirm(
@@ -892,9 +984,12 @@ export function useChatSession(deps: ChatSessionDeps) {
       if (!ok) return;
     }
     const sid = streamingId;
-    const pid = runningPromptId(gen);
-    dispatch({ t: "stop" });  // 一次性转 idle
+    const pid = runningPromptId(gen) ?? slowWatchPromptId;  // 慢守望阶段 gen 里已无 promptId
+    dispatch({ t: "stop" });
     stopProgress();
+    setSlowWatchPromptId(null);  // 清慢守望状态，停止键消失
+    if (pid) removePending(pid);
+    refreshChatBackgroundActivities();
     await hardCancel(pid);
     if (sid) {
       setMessages((ms) =>
@@ -904,8 +999,9 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
 
   // 队列条「引导」：把该排队消息以「打断+合并」方式立即执行。
+  // 内容取自后端队列项（本地内容映射优先，缺失用文本兜底）；先从后端队列删除再本地即时发送。
   const guideQueued = async (id: string) => {
-    const item = queuedItem(gen, id);
+    const item = queued.find((q) => q.id === id);
     if (!item) return;
     if (needsConfirm(gen)) {
       const ok = await askConfirm(
@@ -917,7 +1013,9 @@ export function useChatSession(deps: ChatSessionDeps) {
     }
     const sid = streamingId;
     const pid = runningPromptId(gen);
-    dispatch({ t: "removeQueued", id });  // 出队该条
+    dropQueueContent(id);
+    setQueued((current) => current.filter((q) => q.id !== id));  // 本地即时移除
+    void cancelChatQueueTask(id).catch(() => {});                // 从后端队列删除，避免 worker 再跑
     dispatch({ t: "stop" });              // 停当前生成（保留半成品）
     await hardCancel(pid);
     if (sid) {
@@ -925,6 +1023,7 @@ export function useChatSession(deps: ChatSessionDeps) {
         ms.map((m) => (m.id === sid ? { ...m, text: (m.text || "") + "（已打断）" } : m)),
       );
     }
+    void refreshQueue();
     dispatchSend(item.content);  // 同 thread 新一轮：AI 带上下文续写 = 合并
   };
 
@@ -985,7 +1084,7 @@ export function useChatSession(deps: ChatSessionDeps) {
   };
 
   return {
-    messages, streamingId, wfRunning, wfProgress, queued, regeneratingIds,
+    messages, streamingId, wfRunning, slowWatchPromptId, wfProgress, wfNode, queued, regeneratingIds,
     send, runCommand, pushBot, pushMsg,
     actOnPromptApproval, actOnRouteChoice, regenerateResult,
     pickTemplate, runWorkflow, updateCardDraft, markCardDone, markCardReopen,

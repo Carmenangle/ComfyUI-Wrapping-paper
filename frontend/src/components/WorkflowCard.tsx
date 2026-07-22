@@ -18,6 +18,7 @@ export function WorkflowCard({
   onRun,
   onNotify,
   onOrchestrate,
+  isBusy = false,
 }: {
   msg: ChatMessage;
   comfyUrl: string;
@@ -28,6 +29,7 @@ export function WorkflowCard({
   onRun: () => void;
   onNotify: (text: string) => void;
   onOrchestrate: () => void;
+  isBusy?: boolean;
 }) {
   const wf = msg.workflow!;
   const [fullWorkflow, setFullWorkflow] = useState<any>(null); // 完整原始工作流
@@ -250,7 +252,9 @@ export function WorkflowCard({
                   参数已确认。下一条输入 <code>/s</code> 启动工作流；也可让 AI 再改参。
                 </p>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn primary" onClick={onRun}>运转工作流</button>
+                  <button className="btn primary" disabled={isBusy} onClick={onRun}>
+                    {isBusy ? "运转中…" : "运转工作流"}
+                  </button>
                   <button className="btn" onClick={onReopen}>更改</button>
                   <button className="btn" onClick={onOrchestrate} title="让 AI 规划这些输入/输出口怎么填">
                     <Sparkles size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />

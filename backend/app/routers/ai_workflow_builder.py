@@ -8,6 +8,8 @@
 业务编排（检索→拼 prompt→调模型→校验重试）已下沉到 services/workflow_builder；
 本层只做 HTTP 适配：收参 → 调服务 → 把 ValueError/ComfyError 包成 HTTPException。
 """
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 
 from pydantic import BaseModel
@@ -15,7 +17,7 @@ from pydantic import BaseModel
 from app.config import COMFYUI_BASE_URL
 from app.routers.ai_common import EmbedModelReq, chat
 from app.services import (
-    node_index, workflow_builder, skeleton_store, build_session_store,
+    node_index, workflow_builder, skeleton_store, build_session_store, workflow_build_tasks,
 )
 from app.services.comfyui_client import ComfyError
 
@@ -276,4 +278,49 @@ def build_session_delete(req: DeleteSessionReq) -> dict:
     if not ok:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"ok": True}
+
+
+# —— 持久化后台搭建任务 ——
+
+class BuildTaskRequest(EmbedModelReq):
+    session_id: str = "draft"
+    mode: Literal["direct", "module", "workflow", "plan"] = "direct"
+    need: str = ""
+    comfy_url: str = COMFYUI_BASE_URL
+    workflow_dir: str = ""
+    current_graph: dict = {}
+    history: list[dict] = []
+
+
+@router.post("/build/tasks")
+def build_task_enqueue(req: BuildTaskRequest) -> dict:
+    """创建持久化搭建任务，立即返回任务快照；实际模型调用由后台 worker 执行。"""
+    if not req.need.strip():
+        raise HTTPException(status_code=400, detail="需求不能为空")
+    return workflow_build_tasks.enqueue(req.model_dump())
+
+
+@router.get("/build/tasks")
+def build_task_list(session_id: str = "", limit: int = 100) -> dict:
+    return {"tasks": workflow_build_tasks.list_tasks(session_id, limit)}
+
+
+@router.get("/build/task")
+def build_task_get(id: str = "") -> dict:
+    task = workflow_build_tasks.get(id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="搭建任务不存在")
+    return task
+
+
+class BuildTaskActionReq(BaseModel):
+    id: str = ""
+
+
+@router.post("/build/task/cancel")
+def build_task_cancel(req: BuildTaskActionReq) -> dict:
+    task = workflow_build_tasks.cancel(req.id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="搭建任务不存在")
+    return task
 

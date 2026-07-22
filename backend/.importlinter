@@ -12,9 +12,10 @@ forbidden_modules =
     app.routers
 
 [importlinter:contract:background-run-stack-layers]
-name = 后台运行栈方向：agent_runner 依赖底座(thread_admission/agent_contracts)，底座不得反向依赖
+name = 后台运行栈方向：队列依赖 agent_runner，agent_runner 依赖底座(thread_admission/agent_contracts)，底座不得反向依赖
 type = layers
 layers =
+    app.services.chat_agent_queue
     app.services.agent_runner
     app.services.thread_admission | app.services.agent_contracts
 
@@ -30,6 +31,7 @@ layers =
 name = 搭建栈方向：编排依赖搭建回合与图规则，底层不得反向依赖
 type = layers
 layers =
+    app.services.workflow_build_tasks
     app.services.workflow_builder
     app.services.workflow_build_turn | app.services.workflow_graph_rules | app.services.workflow_merge
     app.services.node_candidates

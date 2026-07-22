@@ -113,10 +113,23 @@ def save_template(data: dict, template_id: str | None = None) -> dict:
     else:
         template_id = uuid.uuid4().hex
         created = now
+
+    # 新建模板时嵌入工作流快照，使模板独立于源文件后续修改
+    workflow_data = data.get("workflow_data")
+    if workflow_data is None:
+        src = data.get("source_path", "")
+        if src:
+            try:
+                from pathlib import Path as _Path
+                workflow_data = json.loads(_Path(src).read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                workflow_data = None
+
     record = _normalize({
         "id": template_id,
         "name": data.get("name", "未命名模板"),
         "source_path": data.get("source_path", ""),
+        "workflow_data": workflow_data,
         "exposed": data.get("exposed", []),
         "node_order": data.get("node_order", []),
         "description": data.get("description", ""),

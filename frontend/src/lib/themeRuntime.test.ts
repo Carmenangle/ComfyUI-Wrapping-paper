@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const chatView = readFileSync(new URL("../views/ChatView.tsx", import.meta.url), "utf8");
-const runtime = 'html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"])';
+const runtime = 'html:is([data-theme="bright"], [data-theme="night"], [data-theme="green"], [data-theme="eye-care"], [data-theme="gray"])';
 
 describe("production theme runtime interface", () => {
   it("owns sliced controls once for every production theme", () => {
@@ -28,7 +28,7 @@ describe("production theme runtime interface", () => {
 
   it("renders message artwork in fixed top and bottom layers", () => {
     expect(css).toMatch(
-      /html:is\(\[data-theme="bright"\], \[data-theme="night"\], \[data-theme="green"\]\) \.bubble-user::after\s*\{[^}]*height:\s*104px;[^}]*background-position:\s*center bottom;[^}]*background-size:\s*100% auto;/s,
+      /html:is\(\[data-theme="bright"\], \[data-theme="night"\], \[data-theme="green"\], \[data-theme="gray"\]\) \.bubble-user::after\s*\{[^}]*height:\s*104px;[^}]*background-position:\s*center bottom;[^}]*background-size:\s*100% auto;/s,
     );
     expect(css).toMatch(
       new RegExp(`${runtime.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\.bot-content::before\\s*\\{[^}]*height:\\s*240px;[^}]*background-position:\\s*center top;[^}]*background-size:\\s*100% auto;`, "s"),

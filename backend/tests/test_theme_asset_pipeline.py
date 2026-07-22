@@ -18,7 +18,7 @@ def _targets(theme: str) -> set[str]:
     return {step["target"] for step in plan["steps"]}
 
 
-@pytest.mark.parametrize("theme", ["bright", "eye-care", "night", "green"])
+@pytest.mark.parametrize("theme", ["bright", "eye-care", "night", "green", "gray"])
 def test_theme_manifests_cover_shared_frontend_slots(theme):
     targets = _targets(theme)
     for family in ("main", "secondary"):
@@ -31,7 +31,7 @@ def test_theme_manifests_cover_shared_frontend_slots(theme):
 
 
 def test_theme_entry_scripts_only_select_a_manifest():
-    for theme in ("bright", "eye_care", "green", "night"):
+    for theme in ("bright", "eye_care", "green", "night", "gray"):
         path = ROOT / "scripts" / f"process_{theme}_theme_assets.py"
         source = path.read_text(encoding="utf-8")
         assert "main_for_manifest" in source

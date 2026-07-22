@@ -28,11 +28,15 @@
 | macOS Intel | `macos-x64-standard` | 不提供，CPU Reranker 不进入交互精排 |
 | Linux x64 | `linux-x64-standard` | `linux-x64-full-rag`（NVIDIA CUDA） |
 
-标准版已封装工具运行所需的 Python、全部基础后端依赖和已构建前端，支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版在此基础上额外封装对应平台 Torch、Transformers、SentenceTransformers 等本地 Embedding/Reranker 运行依赖，但不内置任何模型权重。图片、对话、视频 API 和本地模型目录均由用户在设置中配置。解压后运行 `ComfyUI-Wrapping-paper.exe`（Windows）或 `ComfyUI-Wrapping-paper`（macOS/Linux），无需安装 Python、wheel、pip、npm 或 Node.js，应用会打开 `http://127.0.0.1:8010`。
+Windows 下载 `ComfyUI-Wrapping-paper.exe` 和 `launcher-config.json` 到同一目录后运行。启动器左下角可设置关闭到系统托盘、自动更新和自动启动。它会按平台安装 Base、Application 和可选 RAG 三层，无需安装 Python、wheel、pip、npm 或 Node.js。普通代码或前端更新只下载较小的 Application；Python 和基础依赖变化才下载 Base；Torch、Transformers、SentenceTransformers 变化才下载 RAG。应用会打开 `http://127.0.0.1:8010`。
+
+Windows 首次安装可直接下载 `ComfyUI-Wrapping-paper-<版本>-windows-x64-portable.zip`。支撑包已包含启动器、MinGit、Standard Base（Python 与基础依赖）和可见的 Application 源码目录，解压后无需再下载完整 Runtime；用户设置、会话、API 密钥和 RAG 数据不包含在发布包内，运行后只写入本机 `data/userdata`。
+
+标准版支持远程或 Ollama Embedding 与 Hybrid RAG。完整 RAG 版额外提供对应平台的本地 Embedding/Reranker 运行依赖，但不内置模型权重。图片、对话、视频 API 和本地模型目录均由用户在设置中配置。
 
 本工具 Runtime 与 ComfyUI 的 Python 完全分离。设置中的“ComfyUI Python”可留空自动识别整合包或 `.venv/venv`；自定义安装位置需填写其解释器路径。工具不会使用自己的 Python 启动 ComfyUI。提交工作流前会释放本地 Reranker 显存，避免与 ComfyUI 采样同时占用 GPU/MPS。
 
-完整 RAG 包超过 GitHub 单文件限制时会带 `.parts.json` 和多个 `.partNN`。下载同一 Release 的合并工具后，Windows 执行 `powershell -File .\join-runtime.ps1 -Manifest <清单>`，macOS/Linux 执行 `sh ./join-runtime.sh <清单>`；两者都会流式合并并校验 SHA256。
+RAG 层超过 GitHub 单文件限制时会发布多个 `.partNN`；启动器会自动下载、合并并校验 SHA256。`.parts.json` 和合并工具仅供手工恢复使用。
 
 ### 源码开发
 

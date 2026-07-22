@@ -14,9 +14,8 @@ const THEMES: { value: Exclude<Theme, "system">; label: string; description: str
   { value: "bright", label: "瓷白矢车菊", description: "瓷白与矢车菊蓝", colors: ["#f8f7fa", "#647dcb"] },
   { value: "night", label: "乌青暗金", description: "乌青黑与低亮暗金", colors: ["#1B2523", "#B49552"] },
   { value: "eye-care", label: "象牙鼠尾草", description: "暖象牙与鼠尾草绿", colors: ["#FAF7EA", "#6F7F5D"] },
-  { value: "green", label: "绿色", description: "浅绿与深绿", colors: ["#e9f5e9", "#395932"] },
-  { value: "gray", label: "灰色", description: "冷浅灰与蓝灰", colors: ["#f3f4f6", "#394050"] },
-  { value: "high-contrast", label: "高对比", description: "纯黑与纯白", colors: ["#000000", "#ffffff"] },
+  { value: "green", label: "群青翡翠", description: "群青与翡翠", colors: ["#e9f5e9", "#395932"] },
+  { value: "gray", label: "暖烟灰胭脂", description: "暖烟灰与深胭脂", colors: ["#e3dede", "#a63f4f"] },
 ];
 
 export function GeneralPanel({ draft, setDraft }: PanelProps) {

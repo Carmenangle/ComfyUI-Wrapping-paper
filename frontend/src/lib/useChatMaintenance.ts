@@ -14,7 +14,8 @@ interface ChatMaintenanceDeps {
   threadId: string;
   messages: ChatMessage[];
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
-  isBusy: boolean;
+  isBusy: boolean;       // 包含 wfRunning，用于 compact
+  isStreaming: boolean;  // 仅 AI 流式中，用于 clearCache（工作流运行时仍可清）
   chat: Model;
   embed: Model;
   outputDir: string;
@@ -29,6 +30,7 @@ export function useChatMaintenance({
   messages,
   setMessages,
   isBusy,
+  isStreaming,
   chat,
   embed,
   outputDir,
@@ -96,7 +98,7 @@ export function useChatMaintenance({
   };
 
   const clearCache = async (): Promise<boolean> => {
-    if (isBusy || compacting) return false;
+    if (isStreaming || compacting) return false;
     const confirmed = await askConfirm(
       "清除缓存会清空当前对话内容，并删除本仓库上传的参考图（reference 文件夹）。\n"
       + "已生成的图片（资产库）和知识库内容都会保留，不受影响。确定清除吗？",

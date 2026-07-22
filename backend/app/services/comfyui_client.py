@@ -43,7 +43,7 @@ def _base(url: str) -> str:
         raise ComfyError(str(e), 400)
 
 
-def is_up(url: str, timeout: float = 1.5) -> bool:
+def is_up(url: str, timeout: float = 5.0) -> bool:
     """探测 ComfyUI 是否在响应；HTTP 失败则退化为 TCP 端口探测。"""
     try:
         normalized = validate_comfyui_url(url)
@@ -135,7 +135,20 @@ def fetch_result(url: str, prompt_id: str,
 
     entry = hist.get(prompt_id)
     if not entry:
-        return {"status": "pending", "images": [], "videos": [], "texts": []}
+        # 历史里没有：再查队列确认任务是否还在等待/执行中
+        # 若队列里也不存在，说明 ComfyUI 重启后任务丢失
+        try:
+            with urlopen(_base(url) + "/queue", timeout=5) as qr:
+                q = json.loads(qr.read())
+            running = [item[1] for item in q.get("queue_running", [])]
+            pending_q = [item[1] for item in q.get("queue_pending", [])]
+            if prompt_id in running or prompt_id in pending_q:
+                return {"status": "pending", "images": [], "videos": [], "texts": []}
+            # 不在历史也不在队列：任务已丢失（ComfyUI 重启等原因）
+            return {"status": "not_found", "images": [], "videos": [], "texts": []}
+        except Exception:
+            # 队列查询失败时保守返回 pending，避免误判
+            return {"status": "pending", "images": [], "videos": [], "texts": []}
 
     completed = entry.get("status", {}).get("completed", False)
     images: list[dict[str, str]] = []

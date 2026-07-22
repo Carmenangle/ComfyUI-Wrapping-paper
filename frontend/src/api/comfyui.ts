@@ -83,7 +83,7 @@ export interface ResultImage {
 }
 
 export interface GenResult {
-  status: "pending" | "running" | "completed";
+  status: "pending" | "running" | "completed" | "not_found";
   images: ResultImage[];
   videos: ResultImage[];
   texts: string[];
