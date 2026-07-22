@@ -6,9 +6,10 @@ import json
 import shutil
 import subprocess
 import tarfile
+import zipfile
 from pathlib import Path
 
-from portable_release import APP_NAME, _assemble_layer, _manifest, _safe_target
+from portable_release import APP_NAME, _assemble_layer, _manifest, _safe_target, extract_zip
 
 
 SUPPORTED_TARGETS = {
@@ -35,6 +36,16 @@ def extract_tar(archive: Path, destination: Path, *, strip_root: bool) -> None:
                 continue
             _safe_target(destination, relative)
             bundle.extract(member.replace(name=relative, deep=False), destination, filter="data")
+
+
+def extract_archive(archive: Path, destination: Path, *, strip_root: bool) -> None:
+    if zipfile.is_zipfile(archive):
+        extract_zip(archive, destination, strip_root=strip_root)
+        return
+    if tarfile.is_tarfile(archive):
+        extract_tar(archive, destination, strip_root=strip_root)
+        return
+    raise RuntimeError(f"不支持的分层归档格式：{archive.name}")
 
 
 def _target_labels(target: str) -> tuple[str, str, str]:
@@ -68,7 +79,7 @@ def build_tree(
         layer_specs.append(("rag", "rag", "rag_id"))
     for name, folder, state_key in layer_specs:
         archive = _assemble_layer(assets_dir, layers[name], work_dir / "archives")
-        extract_tar(archive, runtime / folder / str(manifest[state_key]), strip_root=True)
+        extract_archive(archive, runtime / folder / str(manifest[state_key]), strip_root=True)
 
     state = {
         key: manifest.get(key, "")

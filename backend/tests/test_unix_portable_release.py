@@ -3,6 +3,7 @@ import importlib.util
 import json
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 
@@ -22,13 +23,18 @@ def _sha256(path: Path) -> str:
 
 def _layer(assets: Path, name: str, root: str, files: dict[str, bytes]) -> dict:
     archive = assets / name
-    with tarfile.open(archive, "w:gz") as bundle:
-        source = assets / "source"
-        for relative, payload in files.items():
-            path = source / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(payload)
-            bundle.add(path, arcname=f"{root}/{relative}")
+    source = assets / "source"
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(archive, "w") as bundle:
+            for relative, payload in files.items():
+                bundle.writestr(f"{root}/{relative}", payload)
+    else:
+        with tarfile.open(archive, "w:gz") as bundle:
+            for relative, payload in files.items():
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+                bundle.add(path, arcname=f"{root}/{relative}")
     return {
         "id": root.split("-", 1)[1],
         "archive": name,
@@ -50,7 +56,7 @@ def _assets(tmp_path: Path, target: str, edition: str) -> Path:
         {"ComfyUI-Wrapping-paper-Runtime": b"runtime"},
     )
     application = _layer(
-        assets, "application.tar.gz", "application-app-a",
+        assets, "application.zip", "application-app-a",
         {"backend/app/main.py": b"app = None"},
     )
     layers = {"base": base, "application": application}
