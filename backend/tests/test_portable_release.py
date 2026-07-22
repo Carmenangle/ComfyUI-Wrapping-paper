@@ -78,7 +78,7 @@ def test_build_portable_bundle_contains_launcher_runtime_source_and_mingit(tmp_p
     assert state["application_id"] == "app-a"
 
 
-def test_full_rag_portable_uses_two_7z_volumes(monkeypatch, tmp_path):
+def test_full_rag_portable_uses_single_7z_archive(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     assets = tmp_path / "assets"
     assets.mkdir()
@@ -116,8 +116,7 @@ def test_full_rag_portable_uses_two_7z_volumes(monkeypatch, tmp_path):
             / "site-packages" / "torch" / "__init__.py"
         ).is_file()
         archive.parent.mkdir(parents=True, exist_ok=True)
-        (archive.parent / (archive.name + ".001")).write_bytes(b"one")
-        (archive.parent / (archive.name + ".002")).write_bytes(b"two")
+        archive.write_bytes(b"archive")
 
     monkeypatch.setattr(portable_release.subprocess, "run", fake_run)
     outputs = portable_release.build_portable(
@@ -125,8 +124,8 @@ def test_full_rag_portable_uses_two_7z_volumes(monkeypatch, tmp_path):
         "windows-x64-full-rag",
     )
 
-    assert [output.suffix for output in outputs] == [".001", ".002"]
-    assert "-v1900m" in seen["command"]
+    assert [output.suffix for output in outputs] == [".7z"]
+    assert not any(part.startswith("-v") for part in seen["command"])
     assert seen["command"][-1] == (
         "ComfyUI-Wrapping-paper-v0.15-windows-x64-Full-RAG-portable"
     )
