@@ -117,6 +117,7 @@ def test_missing_runtime_uses_install_action(in_launcher_dir):
 
 
 def test_existing_source_project_uses_start_action(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher.platform, "system", lambda: "Windows")
     project = tmp_path / "project"
     launcher_output = project / "release-assets"
     launcher_output.mkdir(parents=True)
