@@ -46,7 +46,9 @@ def _session_lock(sess_id: str):
                 import msvcrt
                 while True:
                     try:
-                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                        getattr(msvcrt, "locking")(
+                            lock_file.fileno(), getattr(msvcrt, "LK_LOCK"), 1
+                        )
                         break
                     except OSError:
                         time.sleep(0.05)
@@ -59,7 +61,9 @@ def _session_lock(sess_id: str):
             finally:
                 lock_file.seek(0)
                 if os.name == "nt":
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                    getattr(msvcrt, "locking")(
+                        lock_file.fileno(), getattr(msvcrt, "LK_UNLCK"), 1
+                    )
                 else:
                     import importlib
                     fcntl = importlib.import_module("fcntl")
