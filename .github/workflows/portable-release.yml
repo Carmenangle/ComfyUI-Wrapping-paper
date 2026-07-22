@@ -37,12 +37,12 @@ jobs:
           fi
       - name: 生成用户一键包
         run: |
+          if [[ "${{ matrix.target }}" == "windows-x64-full-rag" || "${{ matrix.target }}" == "linux-x64-full-rag" ]] && ! command -v 7z >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y p7zip-full
+          fi
           if [[ "${{ matrix.target }}" == windows-* ]]; then
             python scripts/portable_release.py build --target "${{ matrix.target }}" --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
           else
-            if [[ "${{ matrix.target }}" == "linux-x64-full-rag" ]] && ! command -v 7z >/dev/null; then
-              sudo apt-get update && sudo apt-get install -y p7zip-full
-            fi
             python scripts/unix_portable_release.py --target "${{ matrix.target }}" --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
           fi
       - name: 上传一键包

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -14,6 +15,8 @@ APP_NAME = "ComfyUI-Wrapping-paper"
 STANDARD_TARGET = "windows-x64-standard"
 FULL_RAG_TARGET = "windows-x64-full-rag"
 CHUNK_SIZE = 1024 * 1024
+GITHUB_ASSET_LIMIT = 2_000_000_000
+VOLUME_SIZE = "1900m"
 
 
 def sha256_file(path: Path) -> str:
@@ -93,10 +96,24 @@ def _write_zip(tree: Path, output: Path, root_name: str) -> Path:
     return output
 
 
+def _write_split_7z(tree: Path, output: Path, root_name: str) -> list[Path]:
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["7z", "a", "-t7z", "-mx=5", f"-v{VOLUME_SIZE}", str(output), root_name],
+        cwd=tree.parent,
+        check=True,
+    )
+    volumes = sorted(output.parent.glob(output.name + ".*"))
+    if len(volumes) != 2 or any(path.stat().st_size >= GITHUB_ASSET_LIMIT for path in volumes):
+        raise RuntimeError(f"Windows 完整版必须生成两个小于 2 GB 的分卷，实际为 {len(volumes)} 个")
+    return volumes
+
+
 def build_portable(
     assets_dir: Path, mingit_archive: Path, version: str,
     output_dir: Path, work_dir: Path, target: str = STANDARD_TARGET,
-) -> Path:
+) -> list[Path]:
     assets_dir = assets_dir.resolve()
     _, manifest = _manifest(assets_dir, version, target)
     launcher = assets_dir / f"{APP_NAME}.exe"
@@ -104,7 +121,9 @@ def build_portable(
         raise FileNotFoundError(f"缺少启动器：{launcher.name}")
     if work_dir.exists():
         shutil.rmtree(work_dir)
-    tree = work_dir / "tree"
+    edition = "Full-RAG" if manifest.get("edition") == "full-rag" else "Standard"
+    root_name = f"{APP_NAME}-{version}-windows-x64-{edition}-portable"
+    tree = work_dir / root_name
     runtime = tree / "data" / "runtime"
     tree.mkdir(parents=True)
     shutil.copy2(launcher, tree / launcher.name)
@@ -139,10 +158,10 @@ def build_portable(
     if not (tree / "dependencies" / "git" / "cmd" / "git.exe").is_file():
         raise RuntimeError("MinGit 压缩包缺少 cmd/git.exe")
 
-    edition = "Full-RAG" if manifest.get("edition") == "full-rag" else "Standard"
-    root_name = f"{APP_NAME}-{version}-windows-x64-{edition}-portable"
-    filename = f"{APP_NAME}-00-USER-DOWNLOAD-Windows-x64-{edition}-{version}.zip"
-    return _write_zip(tree, output_dir / filename, root_name)
+    prefix = f"{APP_NAME}-00-USER-DOWNLOAD-Windows-x64-{edition}-{version}"
+    if target == FULL_RAG_TARGET:
+        return _write_split_7z(tree, output_dir / f"{prefix}.7z", root_name)
+    return [_write_zip(tree, output_dir / f"{prefix}.zip", root_name)]
 
 
 def _download_mingit(config: dict, destination: Path) -> Path:
@@ -181,11 +200,12 @@ def main() -> int:
     mingit = args.mingit_archive or _download_mingit(
         config["mingit"], args.work_dir / "downloads" / "mingit.zip"
     )
-    output = build_portable(
+    outputs = build_portable(
         args.assets_dir, mingit, args.version,
         args.output_dir, args.work_dir / "bundle", args.target,
     )
-    print(output)
+    for output in outputs:
+        print(output)
     return 0
 
 
