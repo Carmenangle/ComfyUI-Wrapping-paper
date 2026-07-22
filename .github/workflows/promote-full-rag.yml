@@ -1,0 +1,50 @@
+name: promote-full-rag
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "已成功完成的 runtime-release 运行 ID"
+        required: true
+        type: string
+      version:
+        description: "要替换的 Release 版本"
+        required: true
+        default: "v0.15"
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-x64-full-rag"
+          path: release-assets
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+      - name: 校验完整 RAG 分层资产
+        shell: bash
+        run: |
+          test -f "release-assets/ComfyUI-Wrapping-paper-update-${{ inputs.version }}-windows-x64-full-rag.json"
+          test -f "release-assets/ComfyUI-Wrapping-paper-update-${{ inputs.version }}-linux-x64-full-rag.json"
+      - name: 替换完整 RAG 分层资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.version }}" release-assets/* --clobber
+      - name: 重组全平台用户包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run portable-release.yml
+          --ref "${{ github.ref_name }}"
+          -f version="${{ inputs.version }}"
