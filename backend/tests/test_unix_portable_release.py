@@ -112,21 +112,26 @@ def test_linux_standard_bundle_contains_shell_start_file(tmp_path):
 
 
 def test_linux_full_rag_uses_two_7z_volumes(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     tree = tmp_path / "work" / "bundle"
     tree.mkdir(parents=True)
-    output = tmp_path / "out" / "bundle.7z"
+    output = Path("out") / "bundle.7z"
     seen = {}
 
     def fake_run(command, cwd, check):
         seen["command"] = command
         seen["cwd"] = cwd
-        output.parent.mkdir(parents=True, exist_ok=True)
-        (output.parent / "bundle.7z.001").write_bytes(b"one")
-        (output.parent / "bundle.7z.002").write_bytes(b"two")
+        archive = Path(command[-2])
+        if not archive.is_absolute():
+            archive = Path(cwd) / archive
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        (archive.parent / "bundle.7z.001").write_bytes(b"one")
+        (archive.parent / "bundle.7z.002").write_bytes(b"two")
 
     monkeypatch.setattr(unix_release.subprocess, "run", fake_run)
     volumes = unix_release._write_split_7z(tree, output, "bundle")
 
     assert [path.suffix for path in volumes] == [".001", ".002"]
     assert "-v1900m" in seen["command"]
+    assert Path(seen["command"][-2]).is_absolute()
     assert seen["cwd"] == tree.parent

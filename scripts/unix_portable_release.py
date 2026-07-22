@@ -132,6 +132,7 @@ def _write_tar(tree: Path, output: Path, root_name: str) -> list[Path]:
 
 
 def _write_split_7z(tree: Path, output: Path, root_name: str) -> list[Path]:
+    output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["7z", "a", "-t7z", "-mx=5", f"-v{VOLUME_SIZE}", str(output), root_name],
