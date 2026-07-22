@@ -42,7 +42,7 @@ def test_standard_and_full_rag_share_external_app_base(tmp_path):
     assert standard == full
     spec = (ROOT / "release" / "runtime-layered.spec").read_text(encoding="utf-8")
     assert 'entry[0].startswith("app.")' in spec
-    assert '"timeit"' in spec
+    assert "sys.stdlib_module_names" in spec
     assert '"sentence_transformers", "transformers", "torch"' in spec
 
 

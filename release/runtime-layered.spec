@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -12,7 +13,7 @@ icon = os.environ.get("LAF_BUILD_ICON") or None
 
 datas = []
 binaries = []
-hiddenimports = ["app.main", "timeit"]
+hiddenimports = ["app.main", *sorted(sys.stdlib_module_names)]
 for module in ("chromadb", "langchain_chroma", "langgraph", "langchain_mcp_adapters"):
     module_datas, module_binaries, module_hidden = collect_all(module)
     datas += module_datas
