@@ -74,9 +74,15 @@ def self_check() -> None:
     ]
     if os.environ.get("LAF_RUNTIME_EDITION") == "full-rag":
         modules.extend(("torch", "transformers", "sentence_transformers"))
-    for module in modules:
-        importlib.import_module(module)
-    print(json.dumps({"status": "ok", "modules": modules}))
+    loaded = {module: importlib.import_module(module) for module in modules}
+    payload = {"status": "ok", "modules": modules}
+    torch = loaded.get("torch")
+    if torch is not None:
+        payload.update({
+            "torch_version": str(torch.__version__),
+            "torch_cuda": getattr(torch.version, "cuda", None),
+        })
+    print(json.dumps(payload))
 
 
 def main() -> None:

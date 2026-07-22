@@ -307,17 +307,14 @@ def build_application_tree(root: Path, frontend_dist: Path, tree: Path, version:
 def build_rag_tree(root: Path, target: RuntimeTarget, tree: Path) -> str:
     packages = tree / "site-packages"
     packages.mkdir(parents=True)
-    torch_command = [
+    install_command = [
         sys.executable, "-m", "pip", "install", "--upgrade", "--target", str(packages),
+        "-r", str(root / "backend" / "requirements-reranker.txt"),
         f"torch=={target.torch_version}",
     ]
     if target.torch_index_url:
-        torch_command.extend(("--index-url", target.torch_index_url))
-    _run(torch_command, root)
-    _run([
-        sys.executable, "-m", "pip", "install", "--upgrade", "--target", str(packages),
-        "-r", str(root / "backend" / "requirements-reranker.txt"),
-    ], root)
+        install_command.extend(("--extra-index-url", target.torch_index_url))
+    _run(install_command, root)
     layer_id = content_id([
         rag_id(root, target), *installed_distribution_snapshot(packages),
     ])
@@ -349,6 +346,22 @@ def run_runtime_self_check(
         raise RuntimeError("Runtime 自检没有返回有效结果") from exc
     if payload.get("status") != "ok":
         raise RuntimeError("Runtime 自检未通过")
+    if target.full_rag:
+        actual_torch = str(payload.get("torch_version") or "")
+        if target.accelerator == "cuda":
+            digits = target.torch_version.rpartition("+cu")[2]
+            expected_cuda = f"{int(digits[:-1])}.{digits[-1]}" if digits.isdigit() else ""
+            actual_cuda = str(payload.get("torch_cuda") or "")
+            if actual_torch != target.torch_version or actual_cuda != expected_cuda:
+                raise RuntimeError(
+                    "CUDA Torch 版本不匹配："
+                    f"期望 {target.torch_version} / CUDA {expected_cuda}，"
+                    f"实际 {actual_torch or '未知'} / CUDA {actual_cuda or 'CPU'}"
+                )
+        elif actual_torch != target.torch_version:
+            raise RuntimeError(
+                f"Torch 版本不匹配：期望 {target.torch_version}，实际 {actual_torch or '未知'}"
+            )
 
 
 def build_runtime(root: Path, target: RuntimeTarget, version: str, output_dir: Path, work_dir: Path, *, install_deps: bool) -> list[Path]:

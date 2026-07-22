@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -53,6 +55,28 @@ def test_base_id_ignores_edition_but_rag_id_tracks_accelerator():
 
     assert runtime_release.base_id(ROOT, standard) == runtime_release.base_id(ROOT, full)
     assert runtime_release.rag_id(ROOT, full)
+
+
+def test_rag_dependencies_and_pinned_torch_install_in_one_transaction(
+    monkeypatch, tmp_path,
+):
+    target = runtime_release.load_targets(
+        ROOT / "release" / "runtime-targets.json"
+    )["windows-x64-full-rag"]
+    commands = []
+    monkeypatch.setattr(
+        runtime_release, "_run",
+        lambda command, cwd: commands.append(command),
+    )
+
+    runtime_release.build_rag_tree(ROOT, target, tmp_path / "rag")
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert f"torch=={target.torch_version}" in command
+    assert str(ROOT / "backend" / "requirements-reranker.txt") in command
+    assert "--extra-index-url" in command
+    assert "--index-url" not in command
 
 
 def test_runtime_environment_uses_writable_data_without_bundled_models(tmp_path):
@@ -150,6 +174,29 @@ def test_runtime_self_check_resolves_relative_tree_before_changing_cwd(
 
     assert Path(seen["command"][0]).is_absolute()
     assert Path(seen["cwd"]).is_absolute()
+
+
+def test_cuda_runtime_self_check_rejects_cpu_torch(monkeypatch, tmp_path):
+    target = runtime_release.load_targets(
+        ROOT / "release" / "runtime-targets.json"
+    )["windows-x64-full-rag"]
+    tree = tmp_path / "runtime"
+    tree.mkdir()
+    (tree / target.executable_name).touch()
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps({
+            "status": "ok",
+            "torch_version": "2.13.0+cpu",
+            "torch_cuda": None,
+        })
+        stderr = ""
+
+    monkeypatch.setattr(runtime_release.subprocess, "run", lambda *args, **kwargs: Result())
+
+    with pytest.raises(RuntimeError, match="CUDA Torch 版本不匹配"):
+        runtime_release.run_runtime_self_check(tree, target)
 
 
 def test_application_layer_keeps_backend_source_visible(tmp_path):
