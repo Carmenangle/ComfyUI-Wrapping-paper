@@ -20,6 +20,7 @@ from typing import NamedTuple
 GITHUB_ASSET_LIMIT = 1_900_000_000
 APP_NAME = "ComfyUI-Wrapping-paper"
 RUNTIME_NAME = "ComfyUI-Wrapping-paper-Runtime"
+RAG_LAYOUT_VERSION = 2
 
 
 class RuntimeTarget(NamedTuple):
@@ -168,6 +169,7 @@ def base_id(root: Path, target: RuntimeTarget) -> str:
 
 def rag_id(root: Path, target: RuntimeTarget) -> str:
     return content_id([
+        str(RAG_LAYOUT_VERSION),
         target.os, target.arch, target.python_version, target.accelerator,
         target.torch_version, target.torch_index_url,
         (root / "backend" / "requirements-reranker.txt").read_bytes(),
@@ -308,13 +310,20 @@ def build_rag_tree(root: Path, target: RuntimeTarget, tree: Path) -> str:
     packages = tree / "site-packages"
     packages.mkdir(parents=True)
     install_command = [
-        sys.executable, "-m", "pip", "install", "--upgrade", "--target", str(packages),
+        sys.executable, "-m", "pip", "install", "--upgrade", "--no-compile",
+        "--target", str(packages),
         "-r", str(root / "backend" / "requirements-reranker.txt"),
         f"torch=={target.torch_version}",
     ]
     if target.torch_index_url:
         install_command.extend(("--extra-index-url", target.torch_index_url))
     _run(install_command, root)
+    licenses_root = tree / "licenses"
+    for metadata in packages.glob("*.dist-info"):
+        source = metadata / "licenses"
+        if source.is_dir():
+            licenses_root.mkdir(parents=True, exist_ok=True)
+            shutil.move(source, licenses_root / metadata.name.removesuffix(".dist-info"))
     layer_id = content_id([
         rag_id(root, target), *installed_distribution_snapshot(packages),
     ])
@@ -335,6 +344,7 @@ def run_runtime_self_check(
             "LAF_DATA_DIR": temp_data,
             "LAF_RUNTIME_SELF_TEST": "1",
             "LAF_NO_BROWSER": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
         })
         result = subprocess.run([str(executable.resolve())], cwd=layout, env=env, text=True, capture_output=True, check=False)
     if result.returncode != 0:

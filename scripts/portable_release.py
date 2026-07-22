@@ -120,7 +120,7 @@ def build_portable(
     if work_dir.exists():
         shutil.rmtree(work_dir)
     edition = "Full-RAG" if manifest.get("edition") == "full-rag" else "Standard"
-    root_name = f"{APP_NAME}-{version}-windows-x64-{edition}-portable"
+    root_name = APP_NAME
     tree = work_dir / root_name
     runtime = tree / "data" / "runtime"
     tree.mkdir(parents=True)

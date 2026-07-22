@@ -67,7 +67,7 @@ def test_build_portable_bundle_contains_launcher_runtime_source_and_mingit(tmp_p
     output = outputs[0]
 
     assert output.name == "ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Standard-v0.15.zip"
-    root = "ComfyUI-Wrapping-paper-v0.15-windows-x64-Standard-portable/"
+    root = "ComfyUI-Wrapping-paper/"
     with zipfile.ZipFile(output) as bundle:
         names = set(bundle.namelist())
         state = json.loads(bundle.read(root + "data/runtime/current.json"))
@@ -126,6 +126,4 @@ def test_full_rag_portable_uses_single_7z_archive(monkeypatch, tmp_path):
 
     assert [output.suffix for output in outputs] == [".7z"]
     assert not any(part.startswith("-v") for part in seen["command"])
-    assert seen["command"][-1] == (
-        "ComfyUI-Wrapping-paper-v0.15-windows-x64-Full-RAG-portable"
-    )
+    assert seen["command"][-1] == "ComfyUI-Wrapping-paper"

@@ -32,12 +32,18 @@ jobs:
           merge-multiple: true
           github-token: ${{ github.token }}
           run-id: ${{ inputs.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher-windows-x64
+          path: release-assets
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
       - name: 校验完整 RAG 分层资产
         shell: bash
         run: |
           test -f "release-assets/ComfyUI-Wrapping-paper-update-${{ inputs.version }}-windows-x64-full-rag.json"
           test -f "release-assets/ComfyUI-Wrapping-paper-update-${{ inputs.version }}-linux-x64-full-rag.json"
-      - name: 替换完整 RAG 分层资产
+      - name: 替换完整 RAG 分层资产与 Windows 启动器
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ inputs.version }}" release-assets/* --clobber

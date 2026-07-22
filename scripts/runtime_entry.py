@@ -4,8 +4,10 @@ from __future__ import annotations
 import os
 import importlib
 import json
+import socket
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -85,6 +87,22 @@ def self_check() -> None:
     print(json.dumps(payload))
 
 
+def _port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _open_browser_when_ready(port: int, *, attempts: int = 240) -> None:
+    for _ in range(attempts):
+        if _port_open(port):
+            webbrowser.open(f"http://127.0.0.1:{port}")
+            return
+        time.sleep(0.25)
+
+
 def main() -> None:
     root = runtime_root()
     configure_environment(root)
@@ -93,9 +111,14 @@ def main() -> None:
         sys.stdout.flush()
         os._exit(0)
     if os.environ.get("LAF_NO_BROWSER", "") != "1":
-        threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:8010")).start()
+        threading.Thread(
+            target=_open_browser_when_ready, args=(8010,), daemon=True,
+        ).start()
     import uvicorn
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8010, log_level="info")
+    uvicorn.run(
+        "app.main:app", host="127.0.0.1", port=8010,
+        log_level="info", log_config=None,
+    )
 
 
 if __name__ == "__main__":

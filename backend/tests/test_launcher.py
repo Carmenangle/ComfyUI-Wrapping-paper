@@ -95,6 +95,33 @@ def test_saved_settings_override_distributed_config(in_launcher_dir):
     assert cfg["edition"] == "full-rag"
 
 
+def test_portable_full_rag_state_sets_edition_without_saved_preference(
+    in_launcher_dir,
+):
+    runtime = in_launcher_dir / "data" / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "current.json").write_text(
+        json.dumps({"schema_version": 2, "edition": "full-rag"}),
+        encoding="utf-8",
+    )
+
+    cfg = launcher.load_config()
+
+    assert cfg["edition"] == "full-rag"
+
+
+def test_layered_runtime_never_falls_back_to_whole_package_update(in_launcher_dir):
+    cfg = _cfg()
+    runtime = in_launcher_dir / "data" / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "current.json").write_text(
+        json.dumps({"schema_version": 2, "edition": "full-rag"}),
+        encoding="utf-8",
+    )
+
+    assert launcher.legacy_full_update_allowed(cfg) is False
+
+
 def test_disabling_auto_update_never_checks_without_explicit_action(in_launcher_dir):
     cfg = _cfg() | {"auto_update": False}
     assert launcher.should_check_updates(cfg) is False

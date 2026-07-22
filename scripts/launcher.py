@@ -72,12 +72,23 @@ def load_config() -> dict:
         except Exception:
             pass
     settings = launcher_dir() / "data" / "launcher-settings.json"
+    saved = {}
     if settings.exists():
         try:
             saved = json.loads(settings.read_text(encoding="utf-8"))
             defaults.update({key: saved[key] for key in PREFERENCE_KEYS if key in saved})
         except Exception:
             pass
+    if "edition" not in saved:
+        state_path = launcher_dir() / defaults["runtime_dir"] / "current.json"
+        if state_path.is_file():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                installed_edition = state.get("edition")
+                if state.get("schema_version") == 2 and installed_edition in {"standard", "full-rag"}:
+                    defaults["edition"] = installed_edition
+            except Exception:
+                pass
     return defaults
 
 
@@ -207,6 +218,10 @@ def runtime_installed(cfg: dict) -> bool:
 
 def should_check_updates(cfg: dict, *, force: bool = False) -> bool:
     return force or bool(cfg.get("auto_update", True))
+
+
+def legacy_full_update_allowed(cfg: dict) -> bool:
+    return not bool(current_state(cfg))
 
 
 def primary_action(cfg: dict) -> str:
@@ -997,6 +1012,10 @@ class LauncherApp(tk.Tk):
                 self.after(0, lambda: self._log_msg(f"发现新版本 v{latest}，准备分层更新…"))
                 self.after(0, lambda: self._start_layer_update(release, manifest, plan, latest))
                 return
+        if not legacy_full_update_allowed(self.cfg):
+            self.after(0, lambda: self._log_msg("分层更新清单无效，已跳过整包更新。"))
+            self.after(0, self._maybe_auto_start)
+            return
         # 旧版 Release 没有分层清单时才按总版本判断。
         if runtime_installed(self.cfg) and local and local == latest:
             self.after(0, lambda: self._log_msg(f"已是最新版本 v{latest}。"))

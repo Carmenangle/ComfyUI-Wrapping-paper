@@ -57,6 +57,21 @@ def test_base_id_ignores_edition_but_rag_id_tracks_accelerator():
     assert runtime_release.rag_id(ROOT, full)
 
 
+def test_rag_id_tracks_layout_version(monkeypatch):
+    target = runtime_release.load_targets(
+        ROOT / "release" / "runtime-targets.json"
+    )["windows-x64-full-rag"]
+    original = runtime_release.rag_id(ROOT, target)
+
+    monkeypatch.setattr(
+        runtime_release,
+        "RAG_LAYOUT_VERSION",
+        runtime_release.RAG_LAYOUT_VERSION + 1,
+    )
+
+    assert runtime_release.rag_id(ROOT, target) != original
+
+
 def test_rag_dependencies_and_pinned_torch_install_in_one_transaction(
     monkeypatch, tmp_path,
 ):
@@ -77,6 +92,39 @@ def test_rag_dependencies_and_pinned_torch_install_in_one_transaction(
     assert str(ROOT / "backend" / "requirements-reranker.txt") in command
     assert "--extra-index-url" in command
     assert "--index-url" not in command
+    assert "--no-compile" in command
+
+
+def test_rag_tree_moves_deep_licenses_out_of_site_packages(monkeypatch, tmp_path):
+    target = runtime_release.load_targets(
+        ROOT / "release" / "runtime-targets.json"
+    )["windows-x64-full-rag"]
+    tree = tmp_path / "rag"
+
+    def fake_run(command, cwd):
+        packages = Path(command[command.index("--target") + 1])
+        metadata = packages / "torch-2.13.0+cu130.dist-info"
+        (metadata / "licenses" / "third_party" / "libs_3rdparty").mkdir(
+            parents=True
+        )
+        (metadata / "METADATA").write_text(
+            "Name: torch\nVersion: 2.13.0+cu130\n", encoding="utf-8"
+        )
+        (metadata / "licenses" / "third_party" / "libs_3rdparty" / "LICENSE").write_text(
+            "license", encoding="utf-8"
+        )
+
+    monkeypatch.setattr(runtime_release, "_run", fake_run)
+
+    runtime_release.build_rag_tree(ROOT, target, tree)
+
+    assert not (
+        tree / "site-packages" / "torch-2.13.0+cu130.dist-info" / "licenses"
+    ).exists()
+    assert (
+        tree / "licenses" / "torch-2.13.0+cu130"
+        / "third_party" / "libs_3rdparty" / "LICENSE"
+    ).read_text(encoding="utf-8") == "license"
 
 
 def test_runtime_environment_uses_writable_data_without_bundled_models(tmp_path):
@@ -166,6 +214,7 @@ def test_runtime_self_check_resolves_relative_tree_before_changing_cwd(
     def fake_run(command, **kwargs):
         seen["command"] = command
         seen["cwd"] = kwargs["cwd"]
+        seen["env"] = kwargs["env"]
         return Result()
 
     monkeypatch.chdir(tmp_path)
@@ -174,6 +223,7 @@ def test_runtime_self_check_resolves_relative_tree_before_changing_cwd(
 
     assert Path(seen["command"][0]).is_absolute()
     assert Path(seen["cwd"]).is_absolute()
+    assert seen["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
 
 
 def test_cuda_runtime_self_check_rejects_cpu_torch(monkeypatch, tmp_path):
