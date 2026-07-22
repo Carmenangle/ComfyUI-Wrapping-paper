@@ -1,6 +1,9 @@
 {
-  "schema_version": 1,
-  "target": "windows-x64-standard",
+  "schema_version": 2,
+  "targets": [
+    "windows-x64-standard",
+    "windows-x64-full-rag"
+  ],
   "mingit": {
     "version": "2.55.0.3",
     "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/MinGit-2.55.0.3-64-bit.zip",

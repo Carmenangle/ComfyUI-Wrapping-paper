@@ -182,12 +182,9 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: 组装 Windows 便携支撑包
-        run: >-
-          python scripts/portable_release.py build
-          --version "${{ needs.plan.outputs.version }}"
-          --assets-dir release-assets
-          --output-dir release-assets
-          --work-dir .portable-work
+        run: |
+          python scripts/portable_release.py build --target windows-x64-standard --version "${{ needs.plan.outputs.version }}" --assets-dir release-assets --output-dir release-assets --work-dir .portable-work
+          python scripts/portable_release.py build --target windows-x64-full-rag --version "${{ needs.plan.outputs.version }}" --assets-dir release-assets --output-dir release-assets --work-dir .portable-work
       - name: 附加分片合并工具
         run: cp scripts/join-runtime.ps1 scripts/join-runtime.sh release-assets/
       - uses: softprops/action-gh-release@v2

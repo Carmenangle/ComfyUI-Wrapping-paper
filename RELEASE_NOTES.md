@@ -1,5 +1,12 @@
 # v0.15
 
+## 普通 Windows 用户只需二选一
+
+- **标准版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Standard-v0.15.zip)
+- **完整 RAG 版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Full-RAG-v0.15.zip)
+
+解压后直接运行根目录的 `ComfyUI-Wrapping-paper.exe`。下面的 Base、Application、RAG、Update JSON 和分片文件是启动器自动更新使用的内部资产，普通用户不要手动下载或组合。
+
 ## 分层发布与启动器
 
 - Runtime 拆分为 Base、Application、RAG 三层；普通代码和前端更新只下载 Application 层。

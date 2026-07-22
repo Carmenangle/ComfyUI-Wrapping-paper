@@ -11,7 +11,8 @@ from pathlib import Path
 
 
 APP_NAME = "ComfyUI-Wrapping-paper"
-TARGET = "windows-x64-standard"
+STANDARD_TARGET = "windows-x64-standard"
+FULL_RAG_TARGET = "windows-x64-full-rag"
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -52,18 +53,18 @@ def extract_zip(archive: Path, destination: Path, *, strip_root: bool) -> None:
                 shutil.copyfileobj(source, output)
 
 
-def _manifest(assets_dir: Path, version: str) -> tuple[Path, dict]:
+def _manifest(assets_dir: Path, version: str, target: str) -> tuple[Path, dict]:
     matches = []
-    for path in assets_dir.glob(f"{APP_NAME}-update-*-{TARGET}.json"):
+    for path in assets_dir.glob(f"{APP_NAME}-update-*-{target}.json"):
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
             payload.get("schema_version") == 2
-            and payload.get("target") == TARGET
+            and payload.get("target") == target
             and str(payload.get("app_version", "")).lstrip("v") == version.lstrip("v")
         ):
             matches.append((path, payload))
     if len(matches) != 1:
-        raise RuntimeError(f"需要唯一的 {TARGET} v{version.lstrip('v')} 更新清单，实际找到 {len(matches)} 个")
+        raise RuntimeError(f"需要唯一的 {target} v{version.lstrip('v')} 更新清单，实际找到 {len(matches)} 个")
     return matches[0]
 
 
@@ -94,10 +95,10 @@ def _write_zip(tree: Path, output: Path, root_name: str) -> Path:
 
 def build_portable(
     assets_dir: Path, mingit_archive: Path, version: str,
-    output_dir: Path, work_dir: Path,
+    output_dir: Path, work_dir: Path, target: str = STANDARD_TARGET,
 ) -> Path:
     assets_dir = assets_dir.resolve()
-    _, manifest = _manifest(assets_dir, version)
+    _, manifest = _manifest(assets_dir, version, target)
     launcher = assets_dir / f"{APP_NAME}.exe"
     if not launcher.is_file():
         raise FileNotFoundError(f"缺少启动器：{launcher.name}")
@@ -109,10 +110,13 @@ def build_portable(
     shutil.copy2(launcher, tree / launcher.name)
 
     layers = manifest["layers"]
-    for name, folder, state_key in (
+    layer_specs = [
         ("base", "base", "base_id"),
         ("application", "apps", "application_id"),
-    ):
+    ]
+    if manifest.get("edition") == "full-rag":
+        layer_specs.append(("rag", "rag", "rag_id"))
+    for name, folder, state_key in layer_specs:
         layer = layers[name]
         archive = _assemble_layer(assets_dir, layer, work_dir / "archives")
         extract_zip(archive, runtime / folder / str(manifest[state_key]), strip_root=True)
@@ -135,8 +139,10 @@ def build_portable(
     if not (tree / "dependencies" / "git" / "cmd" / "git.exe").is_file():
         raise RuntimeError("MinGit 压缩包缺少 cmd/git.exe")
 
-    root_name = f"{APP_NAME}-{version}-windows-x64-portable"
-    return _write_zip(tree, output_dir / f"{root_name}.zip", root_name)
+    edition = "Full-RAG" if manifest.get("edition") == "full-rag" else "Standard"
+    root_name = f"{APP_NAME}-{version}-windows-x64-{edition}-portable"
+    filename = f"{APP_NAME}-00-USER-DOWNLOAD-Windows-x64-{edition}-{version}.zip"
+    return _write_zip(tree, output_dir / filename, root_name)
 
 
 def _download_mingit(config: dict, destination: Path) -> Path:
@@ -166,17 +172,18 @@ def main() -> int:
     build.add_argument("--output-dir", type=Path, required=True)
     build.add_argument("--work-dir", type=Path, required=True)
     build.add_argument("--mingit-archive", type=Path)
+    build.add_argument("--target", required=True, choices=(STANDARD_TARGET, FULL_RAG_TARGET))
     args = parser.parse_args()
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    if config.get("schema_version") != 1 or config.get("target") != TARGET:
+    if config.get("schema_version") != 2 or args.target not in config.get("targets", []):
         raise RuntimeError("便携包配置无效")
     mingit = args.mingit_archive or _download_mingit(
         config["mingit"], args.work_dir / "downloads" / "mingit.zip"
     )
     output = build_portable(
         args.assets_dir, mingit, args.version,
-        args.output_dir, args.work_dir / "bundle",
+        args.output_dir, args.work_dir / "bundle", args.target,
     )
     print(output)
     return 0

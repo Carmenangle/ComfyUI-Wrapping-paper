@@ -65,7 +65,8 @@ def test_build_portable_bundle_contains_launcher_runtime_source_and_mingit(tmp_p
         assets, mingit, "v0.15", tmp_path / "out", tmp_path / "work"
     )
 
-    root = "ComfyUI-Wrapping-paper-v0.15-windows-x64-portable/"
+    assert output.name == "ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Standard-v0.15.zip"
+    root = "ComfyUI-Wrapping-paper-v0.15-windows-x64-Standard-portable/"
     with zipfile.ZipFile(output) as bundle:
         names = set(bundle.namelist())
         state = json.loads(bundle.read(root + "data/runtime/current.json"))
@@ -74,3 +75,42 @@ def test_build_portable_bundle_contains_launcher_runtime_source_and_mingit(tmp_p
     assert root + "data/runtime/base/base-a/_internal/python313.dll" in names
     assert root + "data/runtime/apps/app-a/backend/app/main.py" in names
     assert state["application_id"] == "app-a"
+
+
+def test_full_rag_portable_bundle_contains_rag_layer(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "ComfyUI-Wrapping-paper.exe").write_bytes(b"launcher")
+    base = _layer(assets, "base.zip", "base-base-a", {"ComfyUI-Wrapping-paper-Runtime.exe": b"runtime"})
+    application = _layer(assets, "application.zip", "application-app-a", {"backend/app/main.py": b"app = None"})
+    rag = _layer(assets, "rag.zip", "rag-rag-a", {"site-packages/torch/__init__.py": b""})
+    manifest = {
+        "schema_version": 2,
+        "app_version": "v0.15",
+        "target": "windows-x64-full-rag",
+        "edition": "full-rag",
+        "base_id": "base-a",
+        "application_id": "app-a",
+        "rag_id": "rag-a",
+        "layers": {"base": base, "application": application, "rag": rag},
+    }
+    (assets / "ComfyUI-Wrapping-paper-update-v0.15-windows-x64-full-rag.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    mingit = tmp_path / "mingit.zip"
+    with zipfile.ZipFile(mingit, "w") as bundle:
+        bundle.writestr("cmd/git.exe", b"git")
+
+    output = portable_release.build_portable(
+        assets, mingit, "v0.15", tmp_path / "out", tmp_path / "work",
+        "windows-x64-full-rag",
+    )
+
+    assert output.name == "ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Full-RAG-v0.15.zip"
+    root = "ComfyUI-Wrapping-paper-v0.15-windows-x64-Full-RAG-portable/"
+    with zipfile.ZipFile(output) as bundle:
+        names = set(bundle.namelist())
+        state = json.loads(bundle.read(root + "data/runtime/current.json"))
+    assert root + "data/runtime/rag/rag-a/site-packages/torch/__init__.py" in names
+    assert state["edition"] == "full-rag"
+    assert state["rag_id"] == "rag-a"
