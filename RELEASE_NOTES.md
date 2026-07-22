@@ -1,11 +1,31 @@
 # v0.15
 
-## 普通 Windows 用户只需二选一
+## 普通用户下载
+
+### Windows x64（二选一）
 
 - **标准版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Standard-v0.15.zip)
 - **完整 RAG 版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Windows-x64-Full-RAG-v0.15.zip)
 
-解压后直接运行根目录的 `ComfyUI-Wrapping-paper.exe`。下面的 Base、Application、RAG、Update JSON 和分片文件是启动器自动更新使用的内部资产，普通用户不要手动下载或组合。
+解压后运行根目录的 `ComfyUI-Wrapping-paper.exe`。
+
+### macOS（先按芯片选择）
+
+- **Apple 芯片标准版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-macOS-ARM64-Standard-v0.15.tar.gz)
+- **Apple 芯片完整 RAG 版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-macOS-ARM64-Full-RAG-v0.15.tar.gz)
+- **Intel 芯片标准版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-macOS-Intel-x64-Standard-v0.15.tar.gz)
+
+解压后双击 `Start-ComfyUI.command`。
+
+### Linux x64
+
+- **标准版**：[点击下载](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Linux-x64-Standard-v0.15.tar.gz)
+- **完整 RAG 版第 1 卷**：[下载 `.001`](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Linux-x64-Full-RAG-v0.15.7z.001)
+- **完整 RAG 版第 2 卷**：[下载 `.002`](https://github.com/Carmenangle/ComfyUI-Wrapping-paper/releases/download/v0.15/ComfyUI-Wrapping-paper-00-USER-DOWNLOAD-Linux-x64-Full-RAG-v0.15.7z.002)
+
+Linux 完整版需要同时下载 `.001` 和 `.002`，放在同一目录后直接用 7-Zip 打开 `.001`。标准版解压后运行 `start-comfyui.sh`。
+
+下面的 Base、Application、RAG、Update JSON 和分片文件是自动更新使用的内部资产，普通用户不要手动下载或组合。
 
 ## 分层发布与启动器
 

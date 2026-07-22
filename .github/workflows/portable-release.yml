@@ -13,25 +13,49 @@ permissions:
 
 jobs:
   package:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - windows-x64-standard
+          - windows-x64-full-rag
+          - macos-arm64-standard
+          - macos-arm64-full-rag
+          - macos-x64-standard
+          - linux-x64-standard
+          - linux-x64-full-rag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 下载已验证的 Windows 分层资产
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release download "${{ inputs.version }}"
-          --pattern "*windows-x64-standard*"
-          --pattern "*windows-x64-full-rag*"
-          --pattern "ComfyUI-Wrapping-paper.exe"
-          --dir release-assets
-      - name: 生成两个用户一键包
-        run: |
-          python scripts/portable_release.py build --target windows-x64-standard --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
-          python scripts/portable_release.py build --target windows-x64-full-rag --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
-      - name: 上传一键包并更新下载说明
+      - name: 下载已验证的本平台分层资产
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ inputs.version }}" user-assets/*.zip --clobber
-          gh release edit "${{ inputs.version }}" --notes-file RELEASE_NOTES.md
+          gh release download "${{ inputs.version }}" --pattern "*${{ matrix.target }}*" --dir release-assets
+          if [[ "${{ matrix.target }}" == windows-* ]]; then
+            gh release download "${{ inputs.version }}" --pattern "ComfyUI-Wrapping-paper.exe" --dir release-assets
+          fi
+      - name: 生成用户一键包
+        run: |
+          if [[ "${{ matrix.target }}" == windows-* ]]; then
+            python scripts/portable_release.py build --target "${{ matrix.target }}" --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
+          else
+            if [[ "${{ matrix.target }}" == "linux-x64-full-rag" ]] && ! command -v 7z >/dev/null; then
+              sudo apt-get update && sudo apt-get install -y p7zip-full
+            fi
+            python scripts/unix_portable_release.py --target "${{ matrix.target }}" --version "${{ inputs.version }}" --assets-dir release-assets --output-dir user-assets --work-dir .portable-work
+          fi
+      - name: 上传一键包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.version }}" user-assets/* --clobber
+
+  notes:
+    needs: [package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 更新下载说明
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ inputs.version }}" --notes-file RELEASE_NOTES.md

@@ -11,6 +11,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: write
   contents: write
 
 env:
@@ -193,3 +194,10 @@ jobs:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           overwrite_files: true
+      - name: 触发全平台用户一键包组装
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run portable-release.yml
+          --ref "${{ github.ref_name }}"
+          -f version="${{ needs.plan.outputs.version }}"
