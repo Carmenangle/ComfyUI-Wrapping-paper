@@ -8,6 +8,24 @@ import { isLafMessageFromStrict, postToFrame } from "./lafLock";
 
 type Chat = { baseUrl: string; apiKey: string; modelName: string };
 
+// 常见 ComfyUI 节点的 widget 顺序 → 真实 widget 名（UI 格式 widgets_values 无名，据此对齐）。
+// 仅用于未确认卡从 raw.workflow 解析；apply 按名匹配，故名字须与 ComfyUI 一致。
+const WIDGET_NAMES: Record<string, string[]> = {
+  EmptyLatentImage: ["width", "height", "batch_size"],
+  EmptySD3LatentImage: ["width", "height", "batch_size"],
+  CLIPTextEncode: ["text"],
+  KSampler: ["seed", "control_after_generate", "steps", "cfg", "sampler_name", "scheduler", "denoise"],
+  KSamplerAdvanced: ["add_noise", "noise_seed", "control_after_generate", "steps", "cfg",
+    "sampler_name", "scheduler", "start_at_step", "end_at_step", "return_with_leftover_noise"],
+  CheckpointLoaderSimple: ["ckpt_name"],
+  UNETLoader: ["unet_name", "weight_dtype"],
+  VAELoader: ["vae_name"],
+  CLIPLoader: ["clip_name", "type", "device"],
+  LoraLoader: ["lora_name", "strength_model", "strength_clip"],
+  SaveImage: ["filename_prefix"],
+  LatentUpscale: ["upscale_method", "width", "height", "crop"],
+};
+
 export interface OrchestrationDeps {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -17,7 +35,7 @@ export interface OrchestrationDeps {
   imageStyle?: string;  // 用户选的提示词风格 ""/sd/gpt/banana，透传给 workflowPorts
   styleTemplate?: string;  // 选中的自定义风格存档内容（非空时优先）
   pushBot: (text: string) => void;
-  runFreeText: (t: string, content?: RichContent) => void;
+  runFreeText: (t: string, content?: RichContent, skipUserMsg?: boolean, userMsgId?: string) => void;
 }
 
 // 工作流输入口编排：读节点结构 → AI 出计划 → 写画布/capturedGraph。
@@ -75,34 +93,35 @@ export function useWorkflowOrchestration(deps: OrchestrationDeps) {
   // force=false 时先让 AI 判断意图，非编排（普通问答/修饰词/翻译）自动回退到 AI 对话。
   const planWorkflowOps = async (card: ChatMessage, text: string, content: RichContent, force: boolean) => {
     const images = content.images || [];
+    // 立即 push 用户气泡（意图判定是异步 AI 调用，之前不 push 会让回车后界面无反应、
+    // 直到判定返回才和回复一起冒出）。后续所有分支都复用这个 id，绝不重复 push。
+    const userMsgId = crypto.randomUUID();
+    setMessages((m) => [...m, { id: userMsgId, role: "user", text, parts: content.parts }]);
+    const fallbackToChat = () => runFreeText(text, content, true, userMsgId);  // 用户气泡已 push
     let raw;
     try { raw = await getTemplateRaw(card.workflow!.templateId); }
-    catch { return runFreeText(text, content); }  // 读不到模板 → 退回对话，别卡住
+    catch { return fallbackToChat(); }  // 读不到模板 → 退回对话，别卡住
     const nodeIds: string[] = raw.exposed_ids || [];
     if (nodeIds.length === 0) {
       // 没配替换节点：不参与编排（防乱改），直接走对话
-      return runFreeText(text, content);
+      return fallbackToChat();
     }
-    // 读节点结构（已确认卡从 capturedGraph，未确认卡从画布 iframe）
+    // 读节点结构：已确认卡从 capturedGraph（完整 API 图）；未确认卡从模板完整工作流 raw.workflow。
+    // 关键：不能从画布单节点 iframe 读——那些 iframe 用 exposedIds 载入后 keepOnly 会删除其他节点
+    // 并把所有连线置空，导致 latent/条件等被误判「未连接」、上游节点丢失。raw.workflow 含全图全连线。
     let schemas: unknown[] = [];
     if (card.workflow!.done && card.workflow!.capturedGraph) {
       schemas = schemaFromCapturedGraph(card.workflow!.capturedGraph, nodeIds);
     } else {
-      for (const id of nodeIds) {
-        const r = await askNodeFrame<{ nodes: unknown[] }>(
-          card.id, id, { type: "request_node_schema", payload: { nodeIds: [id] } }, "node_schema",
-        );
-        if (r?.nodes) schemas.push(...r.nodes);
-      }
+      schemas = schemaFromRawWorkflow(raw.workflow, nodeIds);
     }
     if (schemas.length === 0) {
-      // 读不到结构：force 时提示重试；否则退回对话（不打扰）
+      // 读不到结构：force 时提示重试；否则退回对话（不打扰）。用户气泡已 push，只补 bot。
       if (force) {
-        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]);
         pushBot("没能读到节点结构（画布可能还在载入）。请稍等画布载入完成后再点「AI 编排」。");
         return;
       }
-      return runFreeText(text, content);
+      return fallbackToChat();
     }
     const modelName = guessModelName(raw.workflow);
     let plan;
@@ -110,20 +129,18 @@ export function useWorkflowOrchestration(deps: OrchestrationDeps) {
       plan = await workflowPorts(text, images.length, schemas, modelName, chat, force, imageStyle || "", styleTemplate || "");
     } catch (e) {
       if (force) {
-        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text }]);
         pushBot(`规划失败：${(e as Error).message}`);
         return;
       }
-      return runFreeText(text, content);  // 判定阶段出错 → 退回对话
+      return fallbackToChat();  // 判定阶段出错 → 退回对话
     }
     // AI 判定这句不是编排意图 → 转普通对话（新手无需记指令）
     if (plan.is_orchestration === false && !force) {
-      return runFreeText(text, content);
+      return fallbackToChat();
     }
-    // 是编排：push 用户消息 + 计划卡（待确认）
+    // 是编排：用户气泡已 push，这里只追加计划卡（待确认）
     setMessages((m) => [
       ...m,
-      { id: crypto.randomUUID(), role: "user", text, parts: content.parts },
       {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -139,24 +156,102 @@ export function useWorkflowOrchestration(deps: OrchestrationDeps) {
     ]);
   };
 
-  // 从 capturedGraph(API格式 {id:{class_type,inputs}}) 提取选中节点的输入结构，供 AI 改参
+  // 从 capturedGraph(API格式 {id:{class_type,inputs}}) 提取选中节点的输入结构，供 AI 改参。
+  // 连线输入的 [srcId,slot] → 记 source_node_id，并把该上游源节点也纳入（neighbor:"upstream"），
+  // 使 AI 能改选中节点左侧接线的内容（如 latent 尺寸改上游 EmptyLatentImage 的 width/height）。
   const schemaFromCapturedGraph = (graph: any, nodeIds: string[]): unknown[] => {
     const out: unknown[] = [];
-    for (const id of nodeIds) {
-      const node = graph?.[id];
-      if (!node) continue;
+    const seen = new Set<string>();
+    const upstreamIds = new Set<string>();
+    const nodeSchema = (id: string, node: any, neighbor?: string) => {
       const inputs: any[] = [];
       const widgets: any[] = [];
       for (const [name, v] of Object.entries(node.inputs || {})) {
         if (Array.isArray(v)) {
-          // [srcId, slot] = 连线输入
-          inputs.push({ name, type: "", connected: true, source_type: "" });
+          const srcId = String(v[0]);
+          inputs.push({ name, type: "", connected: true, source_type: "", source_node_id: srcId });
+          if (!neighbor) upstreamIds.add(srcId);   // 只跟随选中节点一层上游，邻居不再外扩
         } else {
-          // 标量 = widget 当前值
           widgets.push({ name, type: typeof v, value: v });
         }
       }
-      out.push({ id: String(id), type: node.class_type || "", title: "", inputs, widgets });
+      return { id: String(id), type: node.class_type || "", title: "", ...(neighbor ? { neighbor } : {}), inputs, widgets };
+    };
+    for (const id of nodeIds) {
+      const node = graph?.[id];
+      if (!node) continue;
+      seen.add(String(id));
+      out.push(nodeSchema(String(id), node));
+    }
+    // 补进直接上游源节点（去重，跳过已在选中集里的）
+    for (const srcId of upstreamIds) {
+      if (seen.has(srcId)) continue;
+      const node = graph?.[srcId];
+      if (!node) continue;
+      seen.add(srcId);
+      out.push(nodeSchema(srcId, node, "upstream"));
+    }
+    return out;
+  };
+
+  // 从模板完整工作流提取选中节点 + 直接上游的 schema（未确认卡用）。兼容两种格式：
+  // API 格式（{id:{class_type,inputs}}）直接复用 schemaFromCapturedGraph；
+  // UI 格式（{nodes:[{id,type,inputs:[{name,link}],widgets_values}], links:[[id,srcId,srcSlot,dstId,dstSlot,type]]}）
+  // 在此解析：连线从 links 反查上游源节点 id，widget 值从 widgets_values 按序取（够 AI 判断即可）。
+  const schemaFromRawWorkflow = (workflow: any, nodeIds: string[]): unknown[] => {
+    if (!workflow || typeof workflow !== "object") return [];
+    // API 格式：顶层无 nodes 数组，值含 class_type
+    if (!Array.isArray(workflow.nodes)) {
+      return schemaFromCapturedGraph(workflow, nodeIds);
+    }
+    // UI 格式
+    const byId = new Map<string, any>();
+    for (const n of workflow.nodes) if (n && n.id != null) byId.set(String(n.id), n);
+    // link_id -> 上游源节点 id
+    const linkSrc = new Map<number, string>();
+    for (const l of workflow.links || []) {
+      if (Array.isArray(l) && l.length >= 5) linkSrc.set(l[0], String(l[1]));
+    }
+    const out: unknown[] = [];
+    const seen = new Set<string>();
+    const upstreamIds = new Set<string>();
+    const nodeSchema = (n: any, neighbor?: string) => {
+      const inputs: any[] = [];
+      for (const inp of n.inputs || []) {
+        const connected = inp.link != null;
+        const srcId = connected ? (linkSrc.get(inp.link) || "") : "";
+        inputs.push({
+          name: inp.name || "",
+          type: typeof inp.type === "string" ? inp.type : String(inp.type || ""),
+          connected, source_type: "", source_node_id: srcId,
+        });
+        if (!neighbor && srcId) upstreamIds.add(srcId);
+      }
+      // UI 格式 widgets_values 是无名数组，按节点类型映射为真实 widget 名（apply 时按名匹配）。
+      // 覆盖常见文生图节点；未知类型回退 widget_i（仍能读连线，不影响「未连接」判断修复）。
+      const wvals = Array.isArray(n.widgets_values) ? n.widgets_values : [];
+      const names = WIDGET_NAMES[String(n.type || n.comfyClass || "")];
+      const widgets = wvals
+        .map((v: unknown, i: number) => ({
+          name: names?.[i] || `widget_${i}`,
+          type: typeof v, value: v,
+        }))
+        .filter((w: { type: string }) => ["string", "number", "boolean"].includes(w.type));
+      return { id: String(n.id), type: n.type || n.comfyClass || "",
+        title: n.title || "", ...(neighbor ? { neighbor } : {}), inputs, widgets };
+    };
+    for (const id of nodeIds) {
+      const n = byId.get(String(id));
+      if (!n) continue;
+      seen.add(String(id));
+      out.push(nodeSchema(n));
+    }
+    for (const srcId of upstreamIds) {
+      if (seen.has(srcId)) continue;
+      const n = byId.get(srcId);
+      if (!n) continue;
+      seen.add(srcId);
+      out.push(nodeSchema(n, "upstream"));
     }
     return out;
   };
@@ -311,5 +406,16 @@ export function useWorkflowOrchestration(deps: OrchestrationDeps) {
       ),
     );
 
-  return { findWorkflowCardByName, planWorkflowOps, applyWorkflowOps, ignoreWorkflowOps };
+  // 执行前编辑某条 op 的文本值（如把 AI 加工的中文提示词改成 Anima 英文结构）。
+  // 只改 message state 里的 ops.value；apply 读的就是它，天然按编辑后的值执行。
+  const editWorkflowOp = (planMsgId: string, opIndex: number, newValue: string) =>
+    setMessages((ms) =>
+      ms.map((m) => {
+        if (m.id !== planMsgId || !m.portsPlan) return m;
+        const ops = m.portsPlan.ops.map((op, i) => (i === opIndex ? { ...op, value: newValue } : op));
+        return { ...m, portsPlan: { ...m.portsPlan, ops } };
+      }),
+    );
+
+  return { findWorkflowCardByName, planWorkflowOps, applyWorkflowOps, ignoreWorkflowOps, editWorkflowOp };
 }

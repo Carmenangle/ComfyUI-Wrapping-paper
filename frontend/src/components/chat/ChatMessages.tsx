@@ -452,11 +452,16 @@ export function PortsPlanCard({
   plan,
   onApply,
   onIgnore,
+  onEditOp,
 }: {
   plan: NonNullable<ChatMessage["portsPlan"]>;
   onApply: () => void;
   onIgnore: () => void;
+  onEditOp?: (opIndex: number, value: string) => void;
 }) {
+  // 文本类 op（set_widget、文本 replace_output）的 value 可在执行前内联编辑
+  const isEditableText = (op: PortOp) =>
+    op.action === "set_widget" || (op.action === "replace_output" && op.kind !== "image");
   const actionLabel = (op: PortOp) => {
     if (op.action === "set_image") return `放入图${op.image_index || "?"}（新建/接入图像节点）`;
     if (op.action === "replace_output") {
@@ -490,14 +495,41 @@ export function PortsPlanCard({
           </p>
         ) : (
           <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13 }}>
-            {plan.ops.map((op, i) => (
-              <li key={`${op.node_id}-${op.action}-${op.input || op.output || i}`} style={{ marginBottom: 4 }}>
-                <code>#{op.node_id} · {op.action === "replace_output" ? op.output : op.input}</code> → {actionLabel(op)}
-                {op.reason && (
-                  <span style={{ color: "var(--text-muted)" }}>　{op.reason}</span>
-                )}
-              </li>
-            ))}
+            {plan.ops.map((op, i) => {
+              const editable = plan.status === "pending" && onEditOp && isEditableText(op);
+              return (
+                <li key={`${op.node_id}-${op.action}-${op.input || op.output || i}`} style={{ marginBottom: 4 }}>
+                  <code>#{op.node_id} · {op.action === "replace_output" ? op.output : op.input}</code>
+                  {editable ? (
+                    <>
+                      {" → 写入（可编辑）："}
+                      <textarea
+                        className="ports-op-edit"
+                        value={String(op.value ?? "")}
+                        onChange={(e) => onEditOp!(i, e.target.value)}
+                        rows={(() => {
+                          // 长提示词多为无换行长句：按显式换行数 + 字符折行估算（约 48 字/行），
+                          // 数字/短值仍是 1~2 行，长文本自动撑高，最多 12 行避免过长。
+                          const s = String(op.value ?? "");
+                          const byNewline = s.split("\n").length;
+                          const byLength = Math.ceil(s.length / 48);
+                          return Math.min(12, Math.max(1, byNewline, byLength));
+                        })()}
+                        style={{ width: "100%", marginTop: 4, fontSize: 12, fontFamily: "inherit",
+                          padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)",
+                          background: "var(--bg)", color: "var(--text)", resize: "vertical",
+                          lineHeight: 1.5, boxSizing: "border-box" }}
+                      />
+                    </>
+                  ) : (
+                    <> → {actionLabel(op)}</>
+                  )}
+                  {op.reason && (
+                    <span style={{ color: "var(--text-muted)" }}>　{op.reason}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
         {plan.status === "pending" && plan.ops.length > 0 && (

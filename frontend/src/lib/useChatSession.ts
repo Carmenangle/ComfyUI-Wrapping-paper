@@ -782,13 +782,15 @@ export function useChatSession(deps: ChatSessionDeps) {
 
   // 自由文本 → 多 Agent（Supervisor/LangGraph 编排，多轮上下文）：主管分派→生图/反推/灵感/工具专家。
   // 复用同一套生命周期（消息/图片/状态/落盘），是"前端生命周期与后端 agent 解耦"的体现。
-  const runFreeText = (t: string, content?: RichContent) => {
+  // skipUserMsg：用户气泡已由调用方（如编排判定前）提前 push，这里只补 bot 气泡，避免重复。
+  // userMsgId：复用调用方预 push 的用户消息 id，保证后端 userMessageId 关联一致。
+  const runFreeText = (t: string, content?: RichContent, skipUserMsg = false, userMsgId?: string) => {
     const images = content?.images || [];
     const imageMask = content?.maskedImage
       ? { image: content.maskedImage.image, mask: content.maskedImage.mask }
       : undefined;
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: userMsgId || crypto.randomUUID(),
       role: "user",
       text: t,
       parts: content?.parts || (images.length > 0 ? [
@@ -799,7 +801,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     const botId = crypto.randomUUID();
     setMessages((m) => [
       ...m,
-      userMsg,
+      ...(skipUserMsg ? [] : [userMsg]),
       { id: botId, role: "assistant", text: "" },
     ]);
     dispatch({ t: "agentStart", botId });  // 进入 agent 态（未出图）
@@ -939,7 +941,7 @@ export function useChatSession(deps: ChatSessionDeps) {
   });
 
   // 工作流输入口编排（见 lib/workflowOrchestration）：依赖 runFreeText，故声明其后。
-  const { findWorkflowCardByName, planWorkflowOps, applyWorkflowOps, ignoreWorkflowOps } =
+  const { findWorkflowCardByName, planWorkflowOps, applyWorkflowOps, ignoreWorkflowOps, editWorkflowOp } =
     useWorkflowOrchestration({
       messages, setMessages, templates, chat,
       comfyuiUrl: settings.comfyuiUrl, imageStyle: "", styleTemplate: activeStyleTemplate(settings), pushBot, runFreeText,
@@ -1088,7 +1090,7 @@ export function useChatSession(deps: ChatSessionDeps) {
     send, runCommand, pushBot, pushMsg,
     actOnPromptApproval, actOnRouteChoice, regenerateResult,
     pickTemplate, runWorkflow, updateCardDraft, markCardDone, markCardReopen,
-    applyWorkflowOps, ignoreWorkflowOps,
+    applyWorkflowOps, ignoreWorkflowOps, editWorkflowOp,
     stopGenerating, guideQueued, cancelQueued,
     confirmReq, compact, compacting,
     contextReminder, dismissContextReminder,

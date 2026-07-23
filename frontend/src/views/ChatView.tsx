@@ -176,7 +176,7 @@ export function ChatView({
     send, runCommand, pushBot,
     actOnPromptApproval, actOnRouteChoice, regenerateResult,
     pickTemplate, runWorkflow, updateCardDraft, markCardDone, markCardReopen,
-    applyWorkflowOps, ignoreWorkflowOps,
+    applyWorkflowOps, ignoreWorkflowOps, editWorkflowOp,
     stopGenerating, guideQueued, cancelQueued,
     confirmReq, compact, compacting, contextReminder, dismissContextReminder,
     clearHome, clearCache,
@@ -425,6 +425,7 @@ export function ChatView({
                   plan={m.portsPlan}
                   onApply={() => applyWorkflowOps(m.id)}
                   onIgnore={() => ignoreWorkflowOps(m.id)}
+                  onEditOp={(opIndex, value) => editWorkflowOp(m.id, opIndex, value)}
                 />
               ) : m.inspiration ? (
                 <InspirationCard

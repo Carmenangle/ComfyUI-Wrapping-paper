@@ -28,26 +28,38 @@ function serialize() {
 
 // 收集指定节点的输入口结构（供 AI 判断各口放什么）：
 // 每个口给出 name/type、是否已连线、连线来源节点类型；外加可填 widget（名/类型/当前值）。
-function collectNodeSchema(nodeIds) {
+// includeNeighbors=true 时：额外收进每个连线输入的【直接上游源节点】(neighbor:"upstream")
+// 和每个输出口下游连到的【直接下游节点】(neighbor:"downstream")，使 AI 能改到
+// 选中节点左侧接线所依赖的上游 widget（如 KSampler 的 latent 尺寸在上游 EmptyLatentImage、
+// 正负条件在上游 CLIPTextEncode）。
+function collectNodeSchema(nodeIds, includeNeighbors) {
   const ids = (nodeIds && nodeIds.length ? nodeIds : []).map(String);
   const out = [];
+  const seen = new Set();
   const targets = ids.length
     ? ids.map((id) => app.graph.getNodeById(Number(id))).filter(Boolean)
     : (app.graph._nodes || []);
+  const neighborNodes = [];  // {node, rel} 待补充的上/下游邻居
   for (const n of targets) {
+    seen.add(String(n.id));
     const inputs = [];
     for (const inp of n.inputs || []) {
       let srcType = "";
+      let srcId = "";
       if (inp.link != null && app.graph.links && app.graph.links[inp.link]) {
         const link = app.graph.links[inp.link];
         const src = app.graph.getNodeById(link.origin_id);
         srcType = src ? (src.type || src.comfyClass || "") : "";
+        srcId = src ? String(src.id) : "";
+        // 记直接上游源节点：AI 改「左侧接线」内容（latent 尺寸/提示词等）实为改上游 widget
+        if (includeNeighbors && src) neighborNodes.push({ node: src, rel: "upstream" });
       }
       inputs.push({
         name: inp.name || "",
         type: typeof inp.type === "string" ? inp.type : String(inp.type || ""),
         connected: inp.link != null,
         source_type: srcType,
+        source_node_id: srcId,   // 上游源节点 id，AI 改左侧接线内容时对该 id 出 set_widget
       });
     }
     const widgets = [];
@@ -74,6 +86,7 @@ function collectNodeSchema(nodeIds) {
           node_type: dst ? (dst.type || dst.comfyClass || "") : "",
           input_name: dstInput ? (dstInput.name || "") : "",
         });
+        if (includeNeighbors && dst) neighborNodes.push({ node: dst, rel: "downstream" });
       }
       outputs.push({
         name: out_.name || "",
@@ -89,6 +102,38 @@ function collectNodeSchema(nodeIds) {
       widgets,
       outputs,
     });
+  }
+  // 第二遍：补进直接上/下游邻居节点（只出自身 inputs/widgets/outputs，不再向外递归一层）。
+  // 带 neighbor 标记供 AI 区分：AI 改选中节点的左侧接线内容时对 upstream 邻居出 set_widget。
+  if (includeNeighbors) {
+    for (const { node: nb, rel } of neighborNodes) {
+      if (seen.has(String(nb.id))) continue;
+      seen.add(String(nb.id));
+      const inputs = (nb.inputs || []).map((inp) => ({
+        name: inp.name || "",
+        type: typeof inp.type === "string" ? inp.type : String(inp.type || ""),
+        connected: inp.link != null,
+      }));
+      const widgets = (nb.widgets || []).map((w) => ({
+        name: w.name || "",
+        type: w.type || "",
+        value: typeof w.value === "string" || typeof w.value === "number" || typeof w.value === "boolean"
+          ? w.value : "",
+      }));
+      const outputs = (nb.outputs || []).map((o) => ({
+        name: o.name || "",
+        type: typeof o.type === "string" ? o.type : String(o.type || ""),
+      }));
+      out.push({
+        id: String(nb.id),
+        type: nb.type || nb.comfyClass || "",
+        title: nb.title || "",
+        neighbor: rel,   // "upstream" | "downstream"
+        inputs,
+        widgets,
+        outputs,
+      });
+    }
   }
   return out;
 }
@@ -864,8 +909,9 @@ if (LOCK) {
           }
           toParent("widget_set", { ok: !!n });
         } else if (d.type === "request_node_schema") {
-          // payload: { nodeIds } —— 回传每个节点的输入口结构与可填 widget，供 AI 判断各口放什么
-          toParent("node_schema", { nodes: collectNodeSchema(d.payload.nodeIds) });
+          // payload: { nodeIds, includeNeighbors } —— 回传每个节点的输入口结构与可填 widget；
+          // includeNeighbors 时附带直接上/下游邻居，供 AI 改左侧接线内容（改上游 widget）
+          toParent("node_schema", { nodes: collectNodeSchema(d.payload.nodeIds, d.payload.includeNeighbors) });
         } else if (d.type === "apply_ops") {
           // payload: { ops:[{node_id,input,action,value,image_name}] } —— 按 AI 计划改画布
           const results = applyOps(d.payload.ops || []);
@@ -938,11 +984,20 @@ function buildGraphFromApiPrompt(apiPrompt) {
   app.graph.setDirtyCanvas(true, true);
 }
 
+function graphNodeCount() {
+  try { return (app.graph && app.graph._nodes ? app.graph._nodes.length : 0); } catch (e) { return 0; }
+}
+
 async function loadAnyFormat(workflow) {
   if (isApiPromptFormat(workflow)) {
     // 依次尝试原生入口（app.loadApiJson 在多数版本存在）
     try {
-      if (typeof app.loadApiJson === "function") { await app.loadApiJson(workflow, "ai_workflow.json"); return; }
+      if (typeof app.loadApiJson === "function") {
+        await app.loadApiJson(workflow, "ai_workflow.json");
+        // 某些版本 loadApiJson 会静默 no-op（不抛错但画布仍空）→ 转手动反建兜底
+        if (graphNodeCount() > 0) return;
+        console.warn("[laf] loadApiJson 未产出节点，转手动反建");
+      }
     } catch (e) { console.warn("[laf] 原生 loadApiJson 失败，转手动反建:", e); }
     // 兜底：LiteGraph 手动反建（版本无关）
     buildGraphFromApiPrompt(workflow);
