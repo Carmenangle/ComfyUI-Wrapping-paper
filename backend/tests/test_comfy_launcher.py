@@ -101,6 +101,46 @@ def test_start_找不到ComfyUI解释器时拒绝使用应用Runtime(tmp_path, m
     assert "Python" in exc_info.value.detail
 
 
+def test_autostart_未配置路径则跳过(monkeypatch):
+    monkeypatch.setattr(comfy_launcher, "load_config",
+                        lambda: {"path": "", "url": "http://127.0.0.1:8188", "python_path": ""})
+    called = []
+    monkeypatch.setattr(comfy_launcher, "start", lambda *a, **k: called.append(a))
+    res = comfy_launcher.autostart()
+    assert res["started"] is False
+    assert called == []
+
+
+def test_autostart_已配路径则按配置启动(monkeypatch):
+    monkeypatch.setattr(comfy_launcher, "load_config", lambda: {
+        "path": r"D:\ComfyUI", "url": "http://127.0.0.1:9999",
+        "python_path": r"D:\ComfyUI\python.exe",
+    })
+    calls = []
+    monkeypatch.setattr(
+        comfy_launcher, "start",
+        lambda path, url, python_path="": (
+            calls.append((path, url, python_path)) or {"running": False, "managed": True}
+        ),
+    )
+    res = comfy_launcher.autostart()
+    assert res["started"] is True and res["managed"] is True
+    assert calls == [(r"D:\ComfyUI", "http://127.0.0.1:9999", r"D:\ComfyUI\python.exe")]
+
+
+def test_autostart_启动失败不抛异常(monkeypatch):
+    monkeypatch.setattr(comfy_launcher, "load_config",
+                        lambda: {"path": r"D:\ComfyUI", "url": "http://127.0.0.1:8188", "python_path": ""})
+
+    def _boom(*a, **k):
+        raise comfy_launcher.LaunchError(400, "找不到解释器")
+
+    monkeypatch.setattr(comfy_launcher, "start", _boom)
+    res = comfy_launcher.autostart()
+    assert res["started"] is False
+    assert "找不到解释器" in res["reason"]
+
+
 def test_restart_按停止等待启动顺序执行(monkeypatch):
     calls = []
     monkeypatch.setattr(comfy_launcher, "stop", lambda url: calls.append(("stop", url)))

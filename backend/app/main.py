@@ -7,7 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import threading
+
 from app.db import init_db
+from app.services import comfy_launcher
 from app.services.workflow_build_tasks import start_worker as start_workflow_build_worker
 from app.services.chat_agent_queue import start_worker as start_chat_agent_queue_worker
 from app.routers import ai, ai_providers, agents, assets, characters, comfyui, loras, mcp, models, node_manager, rag, runs, skills, user_state, workflows
@@ -16,6 +19,13 @@ app = FastAPI(title="Local AI ComfyUI Frontend API")
 init_db()
 start_workflow_build_worker()
 start_chat_agent_queue_worker()
+
+
+@app.on_event("startup")
+def _autostart_comfyui() -> None:
+    """服务真正开始接收请求时，按已保存配置在后台自动拉起 ComfyUI。
+    放在 startup 钩子而非模块级：runtime_entry 自检只 import 本模块，不应误起子进程。"""
+    threading.Thread(target=comfy_launcher.autostart, daemon=True).start()
 
 # 默认只服务本机：这是单机桌面壳，含无鉴权的进程控制/文件读写接口（start/stop/interrupt/
 # save-local/local-view 等）。CORS 只挡浏览器跨源，挡不住非浏览器客户端；故加回环门禁作纵深防御。

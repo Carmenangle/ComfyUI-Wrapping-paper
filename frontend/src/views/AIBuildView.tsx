@@ -8,6 +8,7 @@ import {
   listSkeletons, skeletonGraph, type Skeleton,
   listBuildSessions, getBuildSession, saveBuildSession, deleteBuildSession, type BuildSessionMeta, type BuildTurn,
 } from "../api/ai";
+import { comfyStatus } from "../api/comfyui";
 import { fullUrl, postToFrame, isLafMessageFromStrict } from "../lib/lafLock";
 import { useBuildSession } from "../lib/useBuildSession";
 import { confirmedPlanExecution } from "../lib/workflowBuildExecution";
@@ -38,6 +39,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [frameKey, setFrameKey] = useState(0);  // 递增强制重挂 iframe：ComfyUI 由未起→起后重连白屏 iframe
+  const sawComfyDownRef = useRef(false);  // 是否观测到过 ComfyUI 未运行（仅在真·未起→起 时才需重挂）
   const [note, setNote] = useState("");
   const [incremental, setIncremental] = useState(false);  // 增量模式：冻结现有图只加模块（与精简直连互斥，初始关，选骨架时自动开）
   const [advisor, setAdvisor] = useState(false);  // 顾问模式：先出人话方案+确认，再执行（面向小白）
@@ -114,7 +117,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const src = fullUrl(settings.comfyuiUrl);
   const canSend = input.trim().length > 0 && !busy && !!chat.modelName && ready;
 
-  // 收子帧 ready（画布可用）
+  // 收子帧 ready（画布可用）。依赖 frameKey：iframe 重挂后重新补 ping 重握手。
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
       if (isLafMessageFromStrict(ev, frameRef.current?.contentWindow, settings.comfyuiUrl, "ready")) setReady(true);
@@ -123,7 +126,35 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     // 补一次 ping，防错过首帧 ready
     const t = setTimeout(() => postToFrame(frameRef.current?.contentWindow, "ping_ready", undefined, settings.comfyuiUrl), 1500);
     return () => { window.removeEventListener("message", onMsg); clearTimeout(t); };
-  }, []);
+  }, [frameKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ComfyUI 就绪守护：ComfyUI 首次启动需 20~40 秒，iframe 若在其未起时加载会白屏且不自重连。
+  // 仅在观测到「未运行 → 运行」真转变时才重挂 iframe：
+  // 若 ComfyUI 一开始就在跑（页面打开时已就绪），iframe 不会白屏，此时重挂反而会打断
+  // 正在进行的 laf_full 扩展初始化/握手（重扩展装载 >3s 很常见）→ 画布载入被中断 → 空白。
+  // 只有 autostart 引入的「起初没起、几十秒后才起」场景才需要重挂救白屏。
+  useEffect(() => {
+    if (ready) return;
+    let alive = true;
+    const timer = setInterval(async () => {
+      try {
+        const st = await comfyStatus(settings.comfyuiUrl);
+        if (!alive) return;
+        if (!st.running) {
+          sawComfyDownRef.current = true;   // 记下确实见过未运行
+          return;
+        }
+        // 运行中：只有此前见过未运行（真·未起→起）才重挂救白屏；
+        // 一直在跑的情况不动，交给正常握手，避免打断扩展初始化。
+        if (sawComfyDownRef.current) {
+          clearInterval(timer);             // 只重挂一次，交给重握手；避免反复重挂打断握手
+          setReady(false);                  // 重挂期间禁用发送/骨架按钮，避免 load 投进未挂扩展的空窗被丢弃
+          setFrameKey((k) => k + 1);
+        }
+      } catch { sawComfyDownRef.current = true; /* 探测失败视作未起，继续等 */ }
+    }, 3000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [ready, settings.comfyuiUrl]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -172,13 +203,16 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const push = (role: Msg["role"], text: string) =>
     setMsgs((m) => [...m, { id: crypto.randomUUID(), role, text }]);
 
-  // 选骨架：取 graph → load 进画布。之后发消息走增量模式在此底座上改。
+  // 选骨架：取 graph → load 进画布 → 等 iframe 回 loaded 确认渲染后再报成功。
+  // 不再乐观直接报成功：iframe 可能因慢启动/扩展未就绪把 load 丢弃 → 画布空白但提示已载入。
   const loadSkeleton = async (s: Skeleton) => {
     setLoadingSkel(s.id);
     setNote("");
     try {
       const r = await skeletonGraph(s.id, settings.workflowDir);
-      postToFrame(frameRef.current?.contentWindow, "load", { workflow: r.graph }, settings.comfyuiUrl);
+      // 等 iframe 回 loaded（applyLoad/loadAnyFormat 完成，无论成败都会回）。丢弃/超时→null。
+      const ack = await ask<{ ok?: boolean }>("load", "loaded", 15000, { workflow: r.graph });
+      if (!ack) { setNote("画布未响应载入（ComfyUI 可能仍在初始化），请稍候重试"); return; }
       resetVersions(r.graph, `骨架「${s.name}」`);
       skeletonIdRef.current = s.id;
       // 选了骨架底座 → 默认切增量模式（在此底座上增量加模块，而非精简直连推倒重搭）
@@ -300,8 +334,8 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
     }
   };
 
-  // 向右侧画布发消息并等指定类型回复
-  const ask = <T,>(type: string, expect: string, ms = 6000) =>
+  // 向右侧画布发消息并等指定类型回复（payload 可选：如 load 需带 workflow）
+  const ask = <T,>(type: string, expect: string, ms = 6000, payload?: unknown) =>
     new Promise<T | null>((resolve) => {
       const win = frameRef.current?.contentWindow;
       if (!win) return resolve(null);
@@ -313,7 +347,7 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
         resolve(ev.data.payload as T);
       };
       window.addEventListener("message", onMsg);
-      postToFrame(win, type, undefined, settings.comfyuiUrl);
+      postToFrame(win, type, payload, settings.comfyuiUrl);
       setTimeout(() => { if (!done) { window.removeEventListener("message", onMsg); resolve(null); } }, ms);
     });
 
@@ -323,6 +357,16 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
       "request_api_prompt", "api_prompt", 8000,
     );
     return r?.output || {};
+  };
+
+  // 读回右侧画布的 UI(编辑器)格式（app.graph.serialize()，含 nodes/links 与布局）。
+  // 落盘保存必须用这个：ComfyUI 侧栏打开工作流走标准载入，只认 UI 格式；
+  // 存 API 格式(无 nodes 数组)会被解析成空白画布。同一条 api_prompt 消息里已带回 workflow。
+  const readGraphUI = async (): Promise<Record<string, unknown> | null> => {
+    const r = await ask<{ workflow?: Record<string, unknown>; ok?: boolean }>(
+      "request_api_prompt", "api_prompt", 8000,
+    );
+    return r?.workflow || null;
   };
 
   const ensureSessionForTask = async (graph: Record<string, unknown>, nextMsgs: Msg[] = msgs) => {
@@ -469,9 +513,11 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
   const doSave = async () => {
     setNote("读取画布并保存…");
     try {
-      const graph = await readGraph();
-      if (!Object.keys(graph).length) { setNote("画布为空，无可保存内容"); return; }
-      const r = await saveWorkflow({ graph, embed: settings.embedModel, workflowDir: settings.workflowDir });
+      // 保存 UI 格式（含 nodes/links + 布局），ComfyUI 侧栏打开才不空白。
+      const ui = await readGraphUI();
+      const nodes = (ui?.nodes as unknown[]) || [];
+      if (!ui || !nodes.length) { setNote("画布为空，无可保存内容"); return; }
+      const r = await saveWorkflow({ graph: ui, embed: settings.embedModel, workflowDir: settings.workflowDir });
       setNote("已保存到：" + r.path);
     } catch (e) {
       setNote("保存失败：" + (e as Error).message);
@@ -698,8 +744,16 @@ export function AIBuildView({ onInstallNode }: { onInstallNode?: (q: string) => 
             </button>
           </div>
         </div>
-        <div className="ai-build-canvas">
-          <iframe ref={frameRef} src={src} title="ComfyUI 画布" />
+        <div className="ai-build-canvas-wrap">
+          <div className="ai-build-canvas">
+            {!ready && (
+              <div className="ai-build-canvas-hint">ComfyUI 启动中，请稍候…（首次启动约 20~40 秒）</div>
+            )}
+            <iframe key={frameKey} ref={frameRef} src={src} title="ComfyUI 画布" />
+          </div>
+          <p className="ai-build-canvas-note">
+            提示：若画布空白，多半是另开了 ComfyUI 网页标签抢占了画布——关掉其他 ComfyUI 标签后刷新本页即可。
+          </p>
         </div>
       </div>
       {deleteSess && (

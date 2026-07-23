@@ -12,10 +12,13 @@ from app.services.pathnames import safe_seg
 
 
 def save_workflow(graph: dict, name: str, workflow_dir: str) -> str:
-    """把 AI 生成的 API 格式 graph 存成 .json 到 workflowDir，返回落盘路径。
+    """把画布 graph 存成 .json 到 workflowDir，返回落盘路径。
 
-    存 API prompt 格式（ComfyUI 可直接「加载」执行，本工具 workflows.parse 也能读）。
-    文件名去非法字符 + 加短 uuid 防撞。workflow_dir 缺失/写失败抛 ValueError。
+    前端保存传的是 UI(编辑器)格式（app.graph.serialize()，含 nodes/links + 布局）——
+    ComfyUI 侧栏打开工作流走标准载入，只认 UI 格式；存 API prompt 格式（无 nodes 数组）
+    会被解析成空白画布。本工具 workflows.parse 两种格式都能读，提交生图时再 ui_to_api。
+    原样写入即可（不改结构），文件名去非法字符 + 加短 uuid 防撞。
+    workflow_dir 缺失/写失败抛 ValueError。
     """
     if not workflow_dir:
         raise ValueError("未配置工作流默认读取路径（设置 → 路径 → 工作流默认读取路径）")

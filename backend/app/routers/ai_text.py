@@ -183,9 +183,17 @@ def _prompt_style_hint(model_name: str, style: str = "", template: str = "") -> 
 
 _PORTS_SYSTEM = (
     "你是 ComfyUI 工作流输入/输出口编排助手。用户选定了若干节点，下面给出这些节点的结构：\n"
-    "- inputs：左侧输入口（含 name/type/是否已连线 connected/连线来源 source_type）\n"
+    "- inputs：左侧输入口（含 name/type/是否已连线 connected/连线来源 source_type/上游源节点 id source_node_id）\n"
     "- widgets：节点自身可填参数（name/type/当前值 value）\n"
     "- outputs：右侧输出口（含 name/type/已连到的下游 targets=[{node_id,node_type,input_name}]）\n"
+    "- neighbor：若某节点带此字段（upstream=某选中节点的直接上游源，downstream=直接下游），"
+    "它是为「修改选中节点左侧接线内容」附带的邻居节点，可直接对它出操作。\n"
+    "★左侧接线内容改到上游：选中节点的连线输入（如 KSampler 的 latent/positive/negative/model）本身没有"
+    "可填值——它的内容由上游源节点决定。要改这类内容，就对该输入 source_node_id 指向的上游节点出 set_widget：\n"
+    "  · latent 宽高/批次 → 改上游 EmptyLatentImage 的 width/height/batch_size；\n"
+    "  · 正/负提示词 → 改上游 CLIPTextEncode（正接 positive、负接 negative）的 text；\n"
+    "  · 模型/CLIP/VAE 名 → 改上游对应 Loader 的 widget。\n"
+    "  这些上游节点已作为 neighbor=upstream 一并给你，node_id 用上游节点的 id，不要往连线输入本身写值。\n"
     "你的任务：根据用户需求，规划如何填充/替换这些口，输出一个【操作计划】，由前端确认后执行。\n"
     "★最重要原则：选定的节点只是【可操作范围】，不是必须全填。很多口已经填好/接好线，"
     "用户没明确要求改的，一律不要动、不要放进 ops。只对用户本轮明确想改的口出操作。\n"

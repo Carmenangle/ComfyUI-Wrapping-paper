@@ -405,6 +405,11 @@ function NodeEditor({
         </button>
       </div>
       {comfyHint && <p style={{ color: "#c98a1a", fontSize: 13, marginTop: 6 }}>{comfyHint}</p>}
+      {viewMode === "comfy" && (
+        <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6 }}>
+          提示：若画布空白但左下角显示 N:9 之类节点数，多半是另开了 ComfyUI 网页标签抢占了画布——关掉其他 ComfyUI 标签后刷新本页即可。
+        </p>
+      )}
 
       {viewMode === "comfy" && (
         <div className="template-canvas-layout">

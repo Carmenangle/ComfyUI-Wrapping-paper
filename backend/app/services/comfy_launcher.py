@@ -118,6 +118,23 @@ def start(path: str, url: str, python_path: str = "") -> dict:
     return {"running": False, "managed": True, "message": "已启动，正在初始化（首次较慢）", "python": py}
 
 
+def autostart() -> dict:
+    """后端启动时按已保存配置自动拉起 ComfyUI。
+
+    仅当 comfy_config.json 已填写 ComfyUI 目录时才启动；未配置或启动失败都不抛异常，
+    以免阻断后端。start() 自身幂等（已在运行则跳过），可安全重复调用。
+    """
+    cfg = load_config()
+    path = (cfg.get("path") or "").strip()
+    if not path:
+        return {"started": False, "reason": "未配置 ComfyUI 路径"}
+    try:
+        result = start(path, cfg.get("url", COMFYUI_BASE_URL), cfg.get("python_path", ""))
+        return {"started": True, **result}
+    except LaunchError as e:
+        return {"started": False, "reason": e.detail}
+
+
 def _kill_by_port(port: int = 8188) -> int:
     """按监听端口找进程并杀（含子进程树）。返回杀掉的进程数。
     用于停止非本工具拉起的 ComfyUI（整合包/外部启动，_proc 为空时）。
